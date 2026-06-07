@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Anvil app icon</title>
+  <desc id="desc">A flat anvil silhouette on a rounded near-black square with green and blue accent marks.</desc>
+  <defs>
+    <linearGradient id="accent" x1="252" y1="300" x2="800" y2="408" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7ee787"/>
+      <stop offset="1" stop-color="#58a6ff"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="64" y="64" width="896" height="896" rx="168" fill="#0b0b0b"/>
+  <path d="M188 724H824C848 724 868 744 868 768V812H144V768C144 744 164 724 188 724Z" fill="#161b22"/>
+  <path
+    d="M201 369C216 339 250 316 290 302C341 285 407 280 468 280H702C729 280 753 289 771 307L846 378C858 389 862 406 857 421C852 436 839 447 824 450L722 472C701 477 684 493 679 514L660 600H686C725 600 756 631 756 670V724H819C845 724 866 745 866 771V805H158V771C158 745 179 724 205 724H269V670C269 631 300 600 339 600H436L408 514H335C286 514 241 493 210 456L181 422C168 407 166 385 177 367C188 349 210 341 229 349C252 358 278 361 303 359C271 348 238 350 201 369Z"
+    fill="#d8dee9"
+  />
+  <path
+    d="M316 320H695C718 320 738 328 755 344L795 382H423C360 382 302 395 247 417C235 421 226 406 234 396C254 365 282 341 316 320Z"
+    fill="url(#accent)"
+  />
+  <path d="M356 642H664C682 642 696 656 696 674V724H324V674C324 656 338 642 356 642Z" fill="#8b949e"/>
+  <path d="M452 514H632L614 600H480L452 514Z" fill="#aab4bf"/>
+  <path d="M238 769H786V805H238V769Z" fill="#6e7681"/>
+</svg>
