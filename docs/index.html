@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Anvil — Minecraft texture-pack editor</title>
+    <meta
+      name="description"
+      content="Anvil is a fast desktop texture-pack editor for Minecraft. Pull vanilla textures, paint with a layered pixel editor, and export a resource pack."
+    />
+    <link rel="icon" href="icon.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <meta property="og:title" content="Anvil — Minecraft texture-pack editor" />
+    <meta
+      property="og:description"
+      content="Pull vanilla textures, paint with a layered pixel editor, recolor in one stroke, and export a resource pack."
+    />
+    <meta property="og:image" content="icon.png" />
+  </head>
+  <body>
+    <header class="nav">
+      <a class="brand" href="#top">
+        <img src="icon.png" alt="" width="28" height="28" />
+        <span>Anvil</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#download">Download</a>
+        <a href="#install">Install</a>
+        <a href="https://github.com/NssIs/Anvil" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <p class="kicker">Minecraft texture packs, the fast way</p>
+        <h1>Anvil</h1>
+        <p class="lead">
+          A desktop texture-pack editor for Minecraft. Pull the vanilla textures for any
+          version, paint over them with a layered pixel editor, recolor a whole texture in
+          one stroke, and export a ready-to-use resource pack.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" id="primary-download" href="https://github.com/NssIs/Anvil/releases" target="_blank" rel="noopener">
+            <span id="primary-label">Download</span>
+          </a>
+          <a class="btn btn-ghost" href="#download">All platforms</a>
+        </div>
+        <p class="version-line" id="version-line">Loading the latest release…</p>
+
+        <div class="shot">
+          <img
+            id="screenshot"
+            src="screenshot.png"
+            alt="The Anvil editor"
+            onerror="this.closest('.shot').classList.add('shot--empty'); this.remove();"
+          />
+          <div class="shot-placeholder">Drop a <code>screenshot.png</code> in <code>/docs</code> to show it here</div>
+        </div>
+      </section>
+
+      <section id="download" class="downloads">
+        <h2>Download</h2>
+        <p class="section-sub">Pick your platform — links point to the latest release.</p>
+        <div class="cards">
+          <article class="card" data-os="mac">
+            <div class="card-os">macOS</div>
+            <p class="card-meta" id="mac-meta">Universal · .dmg</p>
+            <a class="btn btn-card" id="mac-btn" href="https://github.com/NssIs/Anvil/releases" target="_blank" rel="noopener">Download</a>
+          </article>
+          <article class="card" data-os="windows">
+            <div class="card-os">Windows</div>
+            <p class="card-meta" id="win-meta">64-bit · .exe installer</p>
+            <a class="btn btn-card" id="win-btn" href="https://github.com/NssIs/Anvil/releases" target="_blank" rel="noopener">Download</a>
+          </article>
+          <article class="card" data-os="linux">
+            <div class="card-os">Linux</div>
+            <p class="card-meta" id="linux-meta">.AppImage / .deb</p>
+            <a class="btn btn-card" id="linux-btn" href="https://github.com/NssIs/Anvil/releases" target="_blank" rel="noopener">Download</a>
+          </article>
+        </div>
+        <p class="all-releases">
+          <a href="https://github.com/NssIs/Anvil/releases" target="_blank" rel="noopener">Browse all releases →</a>
+        </p>
+      </section>
+
+      <section id="install" class="install">
+        <h2>Install</h2>
+        <div class="install-grid">
+          <div class="install-block">
+            <h3>macOS</h3>
+            <p>Open the <code>.dmg</code> and drag <strong>Anvil</strong> to Applications.</p>
+            <p class="hint">
+              The build isn't notarized yet, so the first launch needs
+              <em>right-click → Open</em> (or System Settings → Privacy &amp; Security → Open Anyway).
+            </p>
+          </div>
+          <div class="install-block">
+            <h3>Windows</h3>
+            <p>Run the <code>.exe</code> installer and follow the prompts.</p>
+            <p class="hint">
+              SmartScreen may warn on an unsigned build — choose <em>More info → Run anyway</em>.
+            </p>
+          </div>
+          <div class="install-block">
+            <h3>Linux — AppImage</h3>
+            <pre><code>chmod +x Anvil_*.AppImage
+./Anvil_*.AppImage</code></pre>
+          </div>
+          <div class="install-block">
+            <h3>Linux — Debian / Ubuntu</h3>
+            <pre><code>sudo apt install ./Anvil_*.deb</code></pre>
+          </div>
+        </div>
+        <div class="build-block">
+          <h3>Build from source</h3>
+          <pre><code>git clone https://github.com/NssIs/Anvil.git
+cd Anvil
+npm install
+npm run tauri dev      # run it
+npm run tauri build    # build installers for your OS</code></pre>
+        </div>
+      </section>
+
+      <section class="features">
+        <h2>What's inside</h2>
+        <ul class="feature-list">
+          <li><strong>Layered pixel editor</strong> — create, reorder and toggle layers, with a hover target outline and adjustable brush size.</li>
+          <li><strong>One-stroke recolor</strong> — repaint a texture in any color while keeping its shading. Turn a diamond into a ruby in seconds.</li>
+          <li><strong>Real vanilla textures</strong> — pulled from Mojang's official client jar for any Minecraft version, on demand.</li>
+          <li><strong>Per-project &amp; safe export</strong> — each pack is isolated, and only the textures you actually edited get exported.</li>
+          <li><strong>Custom draggable color picker</strong> — saturation/brightness area, hue slider, hex and presets.</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        <a href="https://github.com/NssIs/Anvil" target="_blank" rel="noopener">NssIs/Anvil</a>
+        · MIT licensed
+      </p>
+      <p class="legal">
+        NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR
+        MICROSOFT. Minecraft and its textures are © Mojang Studios. Anvil ships no Minecraft
+        assets and is intended for players who own the game.
+      </p>
+    </footer>
+
+    <script src="main.js"></script>
+  </body>
+</html>

@@ -6,6 +6,26 @@ textures for a chosen Minecraft version, paint over the ones you want to change
 with a layered pixel editor, and export a ready-to-use resource pack — only the
 textures you actually edited are included in the export.
 
+## Download
+
+**[➜ Download from the Anvil site](https://nssis.github.io/Anvil/)** or grab an
+installer straight from the [latest release](https://github.com/NssIs/Anvil/releases/latest):
+
+| Platform | File |
+| --- | --- |
+| macOS | `.dmg` (universal) |
+| Windows | `.exe` installer |
+| Linux | `.AppImage` or `.deb` |
+
+### Install
+
+- **macOS** — open the `.dmg` and drag Anvil to Applications. The build isn't
+  notarized yet, so the first launch needs right-click → Open.
+- **Windows** — run the `.exe` installer (SmartScreen may warn on an unsigned
+  build: More info → Run anyway).
+- **Linux (AppImage)** — `chmod +x Anvil_*.AppImage && ./Anvil_*.AppImage`
+- **Linux (Debian/Ubuntu)** — `sudo apt install ./Anvil_*.deb`
+
 ## Development
 
 ```bash
