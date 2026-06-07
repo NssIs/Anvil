@@ -5,13 +5,18 @@ name: Release
 #
 # Trigger it by pushing a version tag, e.g.:
 #   git tag v0.1.0 && git push origin v0.1.0
-# or run it manually from the Actions tab (workflow_dispatch).
+# or run it manually from the Actions tab (workflow_dispatch) with a release tag.
 
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Version tag to publish, e.g. v0.1.2. Required unless running from a tag."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -67,14 +72,51 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        env:
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            release_tag="${GITHUB_REF_NAME}"
+          elif [ -n "${INPUT_RELEASE_TAG}" ]; then
+            release_tag="${INPUT_RELEASE_TAG}"
+          else
+            echo "::error::workflow_dispatch requires release_tag when the workflow is not running from a pushed tag."
+            exit 1
+          fi
+
+          if [[ ! "${release_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::release_tag must look like v0.1.2."
+            exit 1
+          fi
+
+          echo "tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check updater signing key
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is required because updater artifacts are enabled."
+            exit 1
+          fi
+
       - name: Build the app and publish the release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Anvil ${{ github.ref_name }}"
+          tagName: ${{ steps.release.outputs.tag }}
+          releaseName: "Anvil ${{ steps.release.outputs.tag }}"
           releaseBody: "Download the installer for your platform below."
           releaseDraft: true
           prerelease: false
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
+          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
