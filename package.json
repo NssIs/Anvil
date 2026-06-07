@@ -2,7 +2,7 @@
   "name": "anvil",
   "private": true,
   "version": "0.1.0",
-  "description": "Desktop texture-pack editor for Minecraft.",
+  "description": "Desktop toolkit for Minecraft creators, starting with texture-pack editing.",
   "license": "MIT",
   "repository": {
     "type": "git",
