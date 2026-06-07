@@ -48,14 +48,33 @@
         </div>
         <p class="version-line" id="version-line">Loading the latest release…</p>
 
-        <div class="shot">
+        <div class="shot shot-gallery" aria-label="Anvil screenshots">
           <img
-            id="screenshot"
-            src="screenshot.png"
-            alt="The Anvil editor"
-            onerror="this.closest('.shot').classList.add('shot--empty'); this.remove();"
+            class="shot-main"
+            src="screenshot-assets.png"
+            alt="Anvil texture asset workspace"
+            width="1872"
+            height="969"
+            decoding="async"
           />
-          <div class="shot-placeholder">Drop a <code>screenshot.png</code> in <code>/docs</code> to show it here</div>
+          <div class="shot-secondary">
+            <img
+              src="screenshot-new-project.png"
+              alt="Anvil new texture pack project dialog"
+              width="1882"
+              height="964"
+              loading="lazy"
+              decoding="async"
+            />
+            <img
+              src="screenshot-pixel-editor.png"
+              alt="Anvil pixel editor with layers and color controls"
+              width="1870"
+              height="966"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
         </div>
       </section>
 

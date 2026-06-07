@@ -186,10 +186,25 @@ main {
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6);
 }
 
+.shot-gallery {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
 .shot img {
   display: block;
   width: 100%;
   height: auto;
+  border: 1px solid #202020;
+  border-radius: 10px;
+  background: #050505;
+}
+
+.shot-secondary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .shot-placeholder {
@@ -216,6 +231,18 @@ main {
 
 .shot-placeholder code {
   color: var(--accent);
+}
+
+@media (max-width: 720px) {
+  .shot-gallery {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .shot-secondary {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
 }
 
 /* Sections */
