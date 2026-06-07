@@ -1,5 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
+import { initShaderWorkspace } from "./shaderWorkspace";
 import { initWorkspace } from "./workspace";
 
 function bindWindowControl(id: string, action: () => Promise<void>) {
@@ -138,6 +141,7 @@ const minecraftVersions = [
 
 type PersistedProject = {
   id: string;
+  projectType: ProjectType;
   name: string;
   minecraftVersion: string;
   packVersion: string;
@@ -151,10 +155,14 @@ type PersistedProject = {
   icon_base64?: string;
   created_at?: number;
   updated_at?: number;
+  project_type?: ProjectType;
 };
+
+type ProjectType = "texture" | "shader";
 
 type ProjectInput = {
   id?: string;
+  projectType: ProjectType;
   name: string;
   minecraftVersion: string;
   packVersion: string;
@@ -177,8 +185,38 @@ function escapeHtml(value: string) {
   });
 }
 
+function stripHtml(value = "") {
+  const element = document.createElement("div");
+  element.innerHTML = value;
+  return element.textContent ?? "";
+}
+
 function isTauriRuntime() {
   return "__TAURI_INTERNALS__" in window || "__TAURI__" in window;
+}
+
+let autoUpdateStarted = false;
+
+async function installAvailableUpdate() {
+  if (!isTauriRuntime() || autoUpdateStarted) {
+    return;
+  }
+
+  autoUpdateStarted = true;
+
+  try {
+    const update = await check();
+
+    if (!update) {
+      return;
+    }
+
+    console.info(`Installing Anvil ${update.version} update.`);
+    await update.downloadAndInstall();
+    await relaunch();
+  } catch (error) {
+    console.error("Automatic update failed.", error);
+  }
 }
 
 const GITHUB_REPO_URL = "https://github.com/NssIs/Anvil";
@@ -282,6 +320,7 @@ async function loadContributors() {
 function normalizeProject(raw: PersistedProject): PersistedProject {
   return {
     id: String(raw.id ?? ""),
+    projectType: raw.projectType ?? raw.project_type ?? "texture",
     name: String(raw.name ?? "Untitled Pack"),
     minecraftVersion: String(raw.minecraftVersion ?? raw.minecraft_version ?? "1.21.6"),
     packVersion: String(raw.packVersion ?? raw.pack_version ?? "1.0"),
@@ -329,6 +368,7 @@ function savePreviewProject(input: ProjectInput) {
     : undefined;
   const project: PersistedProject = {
     id: existing?.id ?? input.id ?? createPreviewProjectId(input.name),
+    projectType: input.projectType,
     name: input.name,
     minecraftVersion: input.minecraftVersion,
     packVersion: input.packVersion,
@@ -361,6 +401,7 @@ async function saveProject(input: ProjectInput) {
   try {
     const project = await invoke<PersistedProject>("save_project", {
       id: input.id ?? null,
+      projectType: input.projectType,
       name: input.name,
       minecraftVersion: input.minecraftVersion,
       packVersion: input.packVersion,
@@ -417,15 +458,30 @@ function applyDescriptionFormat(editor: HTMLElement, code: string) {
 }
 
 window.addEventListener("DOMContentLoaded", () => {
-  const workspace = initWorkspace();
+  void installAvailableUpdate();
 
-  if (new URLSearchParams(window.location.search).get("workspace") === "1") {
+  const workspace = initWorkspace();
+  const shaderWorkspace = initShaderWorkspace();
+
+  const previewParams = new URLSearchParams(window.location.search);
+
+  if (previewParams.get("workspace") === "1") {
     workspace.open({
       name: "Ancient Blocks",
       minecraftVersion: "1.21.6",
       packVersion: "1.0",
       author: "Me!",
       description: "Preview workspace project.",
+    });
+  }
+
+  if (previewParams.get("shader") === "1") {
+    shaderWorkspace.open({
+      name: "Aurora Shade",
+      minecraftVersion: "1.21.6",
+      packVersion: "1.0",
+      author: "Me!",
+      description: "Preview shader project.",
     });
   }
 
@@ -447,6 +503,8 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const createProjectButton = document.getElementById("create-project");
   const modal = document.getElementById("project-modal");
+  const projectTypeButtons = document.querySelectorAll<HTMLButtonElement>("[data-project-type]");
+  const packNameLabel = document.getElementById("pack-name-label");
   const packNameInput = document.getElementById("pack-name") as HTMLInputElement | null;
   const packNameCount = document.getElementById("pack-name-count");
   const packDescription = document.getElementById(
@@ -464,11 +522,13 @@ window.addEventListener("DOMContentLoaded", () => {
   const versionCombobox = document.getElementById("version-combobox");
   const versionMenu = document.getElementById("version-menu");
   const versionStatus = document.getElementById("version-status");
+  const minecraftVersionLabel = document.getElementById("minecraft-version-label");
   const iconPreview = document.getElementById("icon-preview");
   const projectForm = document.querySelector(".project-form");
   let packIconDataUrl = "";
   let projects: PersistedProject[] = [];
   let editingProjectId: string | null = null;
+  let selectedProjectType: ProjectType = "texture";
   const recentProjectList = document.getElementById("recent-project-list");
   const showAllProjects = document.getElementById("show-all-projects") as HTMLButtonElement | null;
   const projectLibraryModal = document.getElementById("project-library-modal");
@@ -480,7 +540,7 @@ window.addEventListener("DOMContentLoaded", () => {
   let libraryQuery = "";
 
   const openPersistedProject = (project: PersistedProject) => {
-    workspace.open({
+    const payload = {
       id: project.id,
       name: project.name,
       minecraftVersion: project.minecraftVersion,
@@ -488,7 +548,14 @@ window.addEventListener("DOMContentLoaded", () => {
       author: project.author,
       description: project.description,
       iconDataUrl: project.iconBase64,
-    });
+    };
+
+    if (project.projectType === "shader") {
+      shaderWorkspace.open(payload);
+    } else {
+      workspace.open(payload);
+    }
+
     projectLibraryModal?.setAttribute("aria-hidden", "true");
     document.body.classList.remove("modal-open");
   };
@@ -514,6 +581,84 @@ window.addEventListener("DOMContentLoaded", () => {
     actionsMenu?.setAttribute("aria-hidden", "true");
     actionsButton?.setAttribute("aria-expanded", "false");
     actionsButton = null;
+  };
+
+  const projectTypeCopy = (projectType: ProjectType) =>
+    projectType === "shader"
+      ? {
+          title: "Shader pack",
+          editTitle: "Edit shader pack",
+          nameLabel: "Shader pack name",
+          namePlaceholder: "Aurora Shade",
+          versionLabel: "Compatibility target",
+          versionStatus: "Optional target, example: 1.21.6",
+          descriptionPlaceholder: "Soft lighting, colored skies, and water tweaks.",
+          empty: "No projects yet.",
+        }
+      : {
+          title: "Texture pack",
+          editTitle: "Edit texture pack",
+          nameLabel: "Texture pack name",
+          namePlaceholder: "Nightfall Tweaks",
+          versionLabel: "Minecraft version",
+          versionStatus: "Example: 1.16.5",
+          descriptionPlaceholder: "A clean texture pack for survival worlds.",
+          empty: "No projects yet.",
+        };
+
+  const formBody = projectForm as HTMLElement | null;
+
+  // Re-trigger the staggered cross-fade on the form fields. Removing the class,
+  // forcing a reflow, then re-adding it restarts the CSS animation every switch.
+  const playFormSwap = () => {
+    if (!formBody) {
+      return;
+    }
+
+    formBody.classList.remove("project-form--swap");
+    void formBody.offsetWidth;
+    formBody.classList.add("project-form--swap");
+  };
+
+  const setSelectedProjectType = (projectType: ProjectType) => {
+    const isSwitch =
+      selectedProjectType !== projectType && modal?.getAttribute("aria-hidden") === "false";
+    selectedProjectType = projectType;
+    const copy = projectTypeCopy(projectType);
+    const title = document.getElementById("project-modal-title");
+
+    if (title) {
+      title.textContent = editingProjectId ? copy.editTitle : copy.title;
+    }
+
+    if (packNameLabel) {
+      packNameLabel.textContent = copy.nameLabel;
+    }
+
+    if (packNameInput) {
+      packNameInput.placeholder = copy.namePlaceholder;
+    }
+
+    if (minecraftVersionLabel) {
+      minecraftVersionLabel.textContent = copy.versionLabel;
+    }
+
+    if (versionStatus) {
+      versionStatus.textContent = copy.versionStatus;
+    }
+
+    if (packDescription) {
+      packDescription.dataset.placeholder = copy.descriptionPlaceholder;
+    }
+
+    projectTypeButtons.forEach((button) => {
+      const isActive = button.dataset.projectType === projectType;
+      button.classList.toggle("project-type--active", isActive);
+    });
+
+    if (isSwitch) {
+      playFormSwap();
+    }
   };
 
   const openProjectActions = (project: PersistedProject, button: HTMLElement) => {
@@ -556,6 +701,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const resetProjectForm = () => {
     editingProjectId = null;
     packIconDataUrl = "";
+    setSelectedProjectType("texture");
 
     if (packNameInput) {
       packNameInput.value = "";
@@ -586,12 +732,7 @@ window.addEventListener("DOMContentLoaded", () => {
     syncDescriptionValue();
     validateMinecraftVersion();
 
-    const title = document.getElementById("project-modal-title");
     const submit = projectForm?.querySelector<HTMLButtonElement>("button[type='submit']");
-
-    if (title) {
-      title.textContent = "Texture pack";
-    }
 
     if (submit) {
       submit.textContent = "Create";
@@ -600,6 +741,7 @@ window.addEventListener("DOMContentLoaded", () => {
 
   const openProjectEditor = (project: PersistedProject) => {
     editingProjectId = project.id;
+    setSelectedProjectType(project.projectType);
 
     if (packNameInput) {
       packNameInput.value = project.name;
@@ -619,7 +761,7 @@ window.addEventListener("DOMContentLoaded", () => {
     }
 
     if (packDescription) {
-      packDescription.textContent = project.description;
+      packDescription.innerHTML = project.description;
     }
 
     packIconDataUrl = project.iconBase64 || "";
@@ -637,12 +779,7 @@ window.addEventListener("DOMContentLoaded", () => {
     syncDescriptionValue();
     validateMinecraftVersion();
 
-    const title = document.getElementById("project-modal-title");
     const submit = projectForm?.querySelector<HTMLButtonElement>("button[type='submit']");
-
-    if (title) {
-      title.textContent = "Edit texture pack";
-    }
 
     if (submit) {
       submit.textContent = "Save changes";
@@ -673,7 +810,8 @@ window.addEventListener("DOMContentLoaded", () => {
     deleteTarget = project;
 
     if (deleteModalBody) {
-      deleteModalBody.textContent = `Deleting “${project.name}” erases its saved textures and project data from this computer. This action cannot be undone.`;
+      const savedData = project.projectType === "shader" ? "saved shader files" : "saved textures";
+      deleteModalBody.textContent = `Deleting “${project.name}” erases its ${savedData} and project data from this computer. This action cannot be undone.`;
     }
 
     deleteModal?.setAttribute("aria-hidden", "false");
@@ -755,14 +893,19 @@ window.addEventListener("DOMContentLoaded", () => {
     card.className = "project-card project-card--menu";
     card.dataset.projectId = project.id;
 
+    const typeLabel = project.projectType === "shader" ? "Shader pack" : "Texture pack";
+    const plainDescription = stripHtml(project.description).trim();
     const description =
-      project.description.trim() || `${project.minecraftVersion} texture pack by ${project.author}.`;
+      plainDescription ||
+      (project.projectType === "shader"
+        ? `${project.minecraftVersion} shader target by ${project.author}.`
+        : `${project.minecraftVersion} texture pack by ${project.author}.`);
     const iconLabel = project.name
       .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() ?? "")
-      .join("") || "TP";
+      .join("") || (project.projectType === "shader" ? "S" : "TP");
 
     const launch = document.createElement("button");
     launch.className = "project-card-launch";
@@ -771,6 +914,7 @@ window.addEventListener("DOMContentLoaded", () => {
     launch.innerHTML = `
       <span class="project-icon">${escapeHtml(iconLabel)}</span>
       <span class="project-copy">
+        <small>${escapeHtml(typeLabel)}</small>
         <h2>${escapeHtml(project.name)}</h2>
         <p>${escapeHtml(description)}</p>
       </span>
@@ -819,7 +963,7 @@ window.addEventListener("DOMContentLoaded", () => {
     if (!nextProjects.length) {
       const empty = document.createElement("p");
       empty.className = "project-empty";
-      empty.textContent = "No texture packs yet.";
+      empty.textContent = "No projects yet.";
       target.append(empty);
       return;
     }
@@ -827,14 +971,17 @@ window.addEventListener("DOMContentLoaded", () => {
     nextProjects.forEach((project) => target.append(renderProjectCard(project)));
   };
 
-  const renderProjects = () => {
-    closeProjectActions();
-    renderProjectList(recentProjectList, projects.slice(0, 3));
-
+  const renderLibraryList = () => {
     const libraryProjects = libraryQuery
       ? projects.filter((project) => project.name.toLowerCase().includes(libraryQuery))
       : projects;
     renderProjectList(projectLibraryList, libraryProjects);
+  };
+
+  const renderProjects = () => {
+    closeProjectActions();
+    renderProjectList(recentProjectList, projects.slice(0, 3));
+    renderLibraryList();
 
     if (showAllProjects) {
       showAllProjects.hidden = projects.length <= 3;
@@ -854,9 +1001,18 @@ window.addEventListener("DOMContentLoaded", () => {
     requestAnimationFrame(() => librarySearch?.focus());
   };
 
+  // Debounce search so each keystroke doesn't trigger a full synchronous re-render
+  // (which janked the whole window on the first keypress), and only re-render the
+  // library list — the recent list never changes while searching.
+  let librarySearchTimer: number | undefined;
   librarySearch?.addEventListener("input", () => {
     libraryQuery = librarySearch.value.trim().toLowerCase();
-    renderProjects();
+
+    if (librarySearchTimer !== undefined) {
+      window.clearTimeout(librarySearchTimer);
+    }
+
+    librarySearchTimer = window.setTimeout(renderLibraryList, 120);
   });
 
   const refreshProjects = async () => {
@@ -933,7 +1089,8 @@ window.addEventListener("DOMContentLoaded", () => {
     versionCombobox?.classList.toggle("version-combobox--valid", exactMatch);
 
     if (!value) {
-      versionStatus.textContent = "Example: 1.16.5";
+      versionStatus.textContent =
+        selectedProjectType === "shader" ? "Optional target, example: 1.21.6" : "Example: 1.16.5";
       versionStatus.className = "version-status";
       setVersionMenuOpen(false);
       return;
@@ -974,6 +1131,17 @@ window.addEventListener("DOMContentLoaded", () => {
   createProjectButton?.addEventListener("click", () => {
     resetProjectForm();
     setModalOpen(true);
+  });
+
+  projectTypeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.disabled) {
+        return;
+      }
+
+      setSelectedProjectType((button.dataset.projectType ?? "shader") as ProjectType);
+      validateMinecraftVersion();
+    });
   });
 
   document.addEventListener("click", (event) => {
@@ -1156,11 +1324,12 @@ window.addEventListener("DOMContentLoaded", () => {
       try {
         const project = await saveProject({
           id: editingProjectId ?? undefined,
+          projectType: selectedProjectType,
           name: projectName,
           minecraftVersion: minecraftVersion?.value || "1.21.6",
           packVersion: "1.0",
           author: packAuthor?.value || "Me!",
-          description: packDescription?.textContent ?? "",
+          description: packDescriptionValue?.value || packDescription?.textContent || "",
           iconBase64: packIconDataUrl,
         });
 

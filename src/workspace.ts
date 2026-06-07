@@ -2,7 +2,18 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 type AssetKind = "block" | "item" | "entity" | "other";
-type Tool = "pencil" | "erase" | "picker" | "recolor";
+type Tool = "pencil" | "erase" | "picker" | "recolor" | "move";
+
+type FloatingPixel = { relX: number; relY: number; color: string };
+type MovePhase = "selecting" | "placed" | "moving";
+type MoveState = {
+  phase: MovePhase;
+  rect: { x: number; y: number; w: number; h: number };
+  floatingPixels: FloatingPixel[];
+  offset: { x: number; y: number };
+  dragStartPixel: { x: number; y: number };
+  dragStartOffset: { x: number; y: number };
+};
 
 type Layer = {
   id: string;
@@ -394,6 +405,7 @@ async function callBackend<T>(command: string, args: Record<string, unknown>, fa
 export function initWorkspace() {
   const homeScreen = document.getElementById("home-screen");
   const workspaceScreen = document.getElementById("project-workspace");
+  const shaderWorkspace = document.getElementById("shader-workspace");
   const assetGrid = document.getElementById("asset-grid");
   const assetSearch = document.getElementById("asset-search") as HTMLInputElement | null;
   const assetCount = document.getElementById("asset-count");
@@ -427,6 +439,10 @@ export function initWorkspace() {
   const gridSize = document.getElementById("grid-size") as HTMLInputElement | null;
   const brushSize = document.getElementById("brush-size") as HTMLInputElement | null;
   const layerList = document.getElementById("layer-list");
+  const selectionOverlay = document.getElementById("selection-overlay");
+  const toolTooltip = document.getElementById("tool-tooltip");
+  const toolTooltipName = toolTooltip?.querySelector<HTMLElement>(".tool-tooltip-name") ?? null;
+  const toolTooltipShortcut = toolTooltip?.querySelector<HTMLElement>(".tool-tooltip-shortcut") ?? null;
   const importFile = document.getElementById("import-file") as HTMLInputElement | null;
   const newTextureModal = document.getElementById("new-texture-modal");
   const newTextureName = document.getElementById("new-texture-name") as HTMLInputElement | null;
@@ -812,6 +828,55 @@ export function initWorkspace() {
 
   let dragLayerId: string | null = null;
   let dragOrderBefore: string[] = [];
+  let moveState: MoveState | null = null;
+
+  const updateSelectionOverlay = () => {
+    if (!selectionOverlay || !pixelCanvas) {
+      return;
+    }
+
+    if (!moveState) {
+      selectionOverlay.style.opacity = "0";
+      return;
+    }
+
+    const canvasRect = pixelCanvas.getBoundingClientRect();
+    const cell = canvasRect.width / state.editor.gridSize;
+    let { x, y, w, h } = moveState.rect;
+
+    if (moveState.phase !== "selecting") {
+      x += moveState.offset.x;
+      y += moveState.offset.y;
+    }
+
+    selectionOverlay.style.left = `${pixelCanvas.offsetLeft + x * cell}px`;
+    selectionOverlay.style.top = `${pixelCanvas.offsetTop + y * cell}px`;
+    selectionOverlay.style.width = `${w * cell}px`;
+    selectionOverlay.style.height = `${h * cell}px`;
+    selectionOverlay.style.opacity = "1";
+  };
+
+  const commitMoveState = () => {
+    if (!moveState) {
+      return;
+    }
+
+    const layer = activeLayer();
+    const size = state.editor.gridSize;
+
+    moveState.floatingPixels.forEach((fp) => {
+      const fx = moveState!.rect.x + fp.relX + moveState!.offset.x;
+      const fy = moveState!.rect.y + fp.relY + moveState!.offset.y;
+
+      if (fx >= 0 && fy >= 0 && fx < size && fy < size) {
+        layer.pixels[fy * size + fx] = fp.color;
+      }
+    });
+
+    state.editor.dirty = true;
+    moveState = null;
+    updateSelectionOverlay();
+  };
 
   const onLayerDragMove = (event: PointerEvent) => {
     if (!dragLayerId) {
@@ -978,6 +1043,19 @@ export function initWorkspace() {
     pixelCanvas.width = size;
     pixelCanvas.height = size;
     drawPixelsToContext(context, compositeLayers(state.editor.layers, size), size);
+
+    if (moveState && moveState.floatingPixels.length > 0) {
+      moveState.floatingPixels.forEach((fp) => {
+        const fx = moveState!.rect.x + fp.relX + moveState!.offset.x;
+        const fy = moveState!.rect.y + fp.relY + moveState!.offset.y;
+
+        if (fx >= 0 && fy >= 0 && fx < size && fy < size) {
+          context.fillStyle = fp.color;
+          context.fillRect(fx, fy, 1, 1);
+        }
+      });
+    }
+
     refreshLayerThumbs();
   };
 
@@ -1208,6 +1286,8 @@ export function initWorkspace() {
   };
 
   const openEditor = async (asset: WorkspaceAsset) => {
+    moveState = null;
+    updateSelectionOverlay();
     selectAsset(asset);
     setGridSize(normalizeGridSize());
     resetEditorLayers(state.editor.gridSize);
@@ -1253,6 +1333,10 @@ export function initWorkspace() {
     if (!state.selectedAsset) {
       setStatus("Select an asset before saving.");
       return;
+    }
+
+    if (moveState) {
+      commitMoveState();
     }
 
     renderPixels();
@@ -1388,6 +1472,11 @@ export function initWorkspace() {
       return;
     }
 
+    if (state.editor.tool === "move") {
+      hidePixelCursor();
+      return;
+    }
+
     const pixel = pixelFromEvent(event);
 
     if (!pixel) {
@@ -1420,6 +1509,56 @@ export function initWorkspace() {
       return;
     }
 
+    if (state.editor.tool === "move") {
+      if (!moveState || moveState.phase === "selecting") {
+        pushHistory();
+        moveState = {
+          phase: "selecting",
+          rect: { x: pixel.x, y: pixel.y, w: 1, h: 1 },
+          floatingPixels: [],
+          offset: { x: 0, y: 0 },
+          dragStartPixel: pixel,
+          dragStartOffset: { x: 0, y: 0 },
+        };
+        state.editor.drawing = true;
+        pixelCanvas.setPointerCapture(event.pointerId);
+        updateSelectionOverlay();
+      } else if (moveState.phase === "placed") {
+        const rx = moveState.rect.x + moveState.offset.x;
+        const ry = moveState.rect.y + moveState.offset.y;
+        const inside =
+          pixel.x >= rx &&
+          pixel.x < rx + moveState.rect.w &&
+          pixel.y >= ry &&
+          pixel.y < ry + moveState.rect.h;
+
+        if (inside) {
+          moveState.phase = "moving";
+          moveState.dragStartPixel = pixel;
+          moveState.dragStartOffset = { ...moveState.offset };
+          state.editor.drawing = true;
+          pixelCanvas.setPointerCapture(event.pointerId);
+        } else {
+          commitMoveState();
+          renderPixels();
+          pushHistory();
+          moveState = {
+            phase: "selecting",
+            rect: { x: pixel.x, y: pixel.y, w: 1, h: 1 },
+            floatingPixels: [],
+            offset: { x: 0, y: 0 },
+            dragStartPixel: pixel,
+            dragStartOffset: { x: 0, y: 0 },
+          };
+          state.editor.drawing = true;
+          pixelCanvas.setPointerCapture(event.pointerId);
+          updateSelectionOverlay();
+        }
+      }
+
+      return;
+    }
+
     state.editor.drawing = true;
 
     if (state.editor.tool !== "picker") {
@@ -1430,6 +1569,40 @@ export function initWorkspace() {
     applyTool(pixel.x, pixel.y);
   });
   pixelCanvas?.addEventListener("pointermove", (event) => {
+    if (state.editor.tool === "move") {
+      if (!moveState || !state.editor.drawing) {
+        return;
+      }
+
+      const pixel = pixelFromEvent(event);
+
+      if (!pixel) {
+        return;
+      }
+
+      if (moveState.phase === "selecting") {
+        const startX = moveState.dragStartPixel.x;
+        const startY = moveState.dragStartPixel.y;
+        const x = Math.min(startX, pixel.x);
+        const y = Math.min(startY, pixel.y);
+        const w = Math.abs(pixel.x - startX) + 1;
+        const h = Math.abs(pixel.y - startY) + 1;
+        moveState.rect = { x, y, w, h };
+        updateSelectionOverlay();
+      } else if (moveState.phase === "moving") {
+        const dx = pixel.x - moveState.dragStartPixel.x;
+        const dy = pixel.y - moveState.dragStartPixel.y;
+        moveState.offset = {
+          x: moveState.dragStartOffset.x + dx,
+          y: moveState.dragStartOffset.y + dy,
+        };
+        renderPixels();
+        updateSelectionOverlay();
+      }
+
+      return;
+    }
+
     if (!state.editor.drawing) {
       return;
     }
@@ -1441,20 +1614,127 @@ export function initWorkspace() {
     }
   });
   pixelCanvas?.addEventListener("pointerup", () => {
+    if (state.editor.tool === "move" && moveState) {
+      if (moveState.phase === "selecting") {
+        state.editor.drawing = false;
+
+        if (moveState.rect.w > 0 && moveState.rect.h > 0) {
+          const layer = activeLayer();
+          const size = state.editor.gridSize;
+          const { x, y, w, h } = moveState.rect;
+          const floating: FloatingPixel[] = [];
+
+          for (let dy = 0; dy < h; dy += 1) {
+            for (let dx = 0; dx < w; dx += 1) {
+              const px = x + dx;
+              const py = y + dy;
+              const idx = py * size + px;
+              const color = layer.pixels[idx];
+
+              if (color) {
+                floating.push({ relX: dx, relY: dy, color });
+                layer.pixels[idx] = null;
+              }
+            }
+          }
+
+          moveState.phase = "placed";
+          moveState.floatingPixels = floating;
+          state.editor.dirty = true;
+          renderPixels();
+          updateSelectionOverlay();
+        } else {
+          moveState = null;
+          updateSelectionOverlay();
+        }
+      } else if (moveState.phase === "moving") {
+        moveState.phase = "placed";
+        state.editor.drawing = false;
+      }
+
+      return;
+    }
+
     state.editor.drawing = false;
   });
   pixelCanvas?.addEventListener("pointercancel", () => {
+    if (state.editor.tool === "move" && moveState) {
+      if (moveState.phase === "moving") {
+        moveState.offset = { ...moveState.dragStartOffset };
+        moveState.phase = "placed";
+        renderPixels();
+        updateSelectionOverlay();
+      } else if (moveState.phase === "selecting") {
+        moveState = null;
+        updateSelectionOverlay();
+      }
+
+      state.editor.drawing = false;
+      return;
+    }
+
     state.editor.drawing = false;
   });
 
+  const setActiveTool = (tool: Tool) => {
+    if (state.editor.tool === "move" && tool !== "move") {
+      commitMoveState();
+      renderPixels();
+    }
+
+    state.editor.tool = tool;
+    document
+      .querySelectorAll<HTMLButtonElement>(".tool-button.is-active")
+      .forEach((activeButton) => activeButton.classList.remove("is-active"));
+    document.querySelector<HTMLButtonElement>(`[data-tool="${tool}"]`)?.classList.add("is-active");
+  };
+
   document.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.editor.tool = (button.dataset.tool ?? "pencil") as Tool;
-      document
-        .querySelectorAll<HTMLButtonElement>(".tool-button.is-active")
-        .forEach((activeButton) => activeButton.classList.remove("is-active"));
-      button.classList.add("is-active");
+      setActiveTool((button.dataset.tool ?? "pencil") as Tool);
     });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-tooltip-name]").forEach((button) => {
+    button.addEventListener("mouseenter", () => {
+      if (!toolTooltip || !toolTooltipName || !toolTooltipShortcut) {
+        return;
+      }
+
+      toolTooltipName.textContent = button.dataset.tooltipName ?? "";
+      toolTooltipShortcut.textContent = button.dataset.tooltipShortcut ?? "";
+      toolTooltip.classList.add("is-visible");
+      toolTooltip.removeAttribute("aria-hidden");
+      const rect = button.getBoundingClientRect();
+      toolTooltip.style.top = `${rect.top}px`;
+      toolTooltip.style.left = `${rect.right + 8}px`;
+    });
+    button.addEventListener("mouseleave", () => {
+      toolTooltip?.classList.remove("is-visible");
+      toolTooltip?.setAttribute("aria-hidden", "true");
+    });
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.ctrlKey && !event.shiftKey && !event.altKey) {
+      const toolByKey: Record<string, Tool> = {
+        "1": "pencil",
+        "2": "erase",
+        "3": "picker",
+        "4": "recolor",
+        "5": "move",
+      };
+      const tool = toolByKey[event.key];
+
+      if (tool) {
+        const editorOpen = editorDrawer?.getAttribute("aria-hidden") === "false";
+
+        if (editorOpen) {
+          event.preventDefault();
+          setActiveTool(tool);
+        }
+      }
+    }
   });
 
   drawColor?.addEventListener("input", () => {
@@ -1509,7 +1789,17 @@ export function initWorkspace() {
     return clamped;
   };
 
+  // While typing, only update the live brush state — don't rewrite the field, or
+  // clearing the value (e.g. to replace "8") instantly snaps it back and blocks
+  // editing. The field is normalized on commit (blur / Enter) instead.
   brushSize?.addEventListener("input", () => {
+    const raw = Math.round(Number(brushSize.value));
+
+    if (Number.isFinite(raw) && raw >= 1) {
+      state.editor.brushSize = Math.min(8, raw);
+    }
+  });
+  brushSize?.addEventListener("change", () => {
     state.editor.brushSize = normalizeBrushSize();
   });
   state.editor.brushSize = normalizeBrushSize();
@@ -1896,6 +2186,7 @@ export function initWorkspace() {
         iconDataUrl: project.iconDataUrl,
       };
       homeScreen?.setAttribute("hidden", "");
+      shaderWorkspace?.setAttribute("hidden", "");
       workspaceScreen?.removeAttribute("hidden");
       closeEditor();
       closeExportModal();
