@@ -1,0 +1,26 @@
+{
+  "name": "anvil",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Desktop texture-pack editor for Minecraft.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NssIs/Anvil"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "vite": "^6.0.3",
+    "typescript": "~5.6.2"
+  }
+}

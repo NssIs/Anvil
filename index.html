@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Anvil</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <main class="app-shell">
+      <header class="titlebar" data-tauri-drag-region>
+        <div class="app-title" data-tauri-drag-region>Anvil</div>
+        <div class="window-controls" aria-label="Window controls">
+          <button
+            class="window-control window-control--minimize"
+            id="window-minimize"
+            type="button"
+            aria-label="Minimize window"
+            title="Minimize"
+          ></button>
+          <button
+            class="window-control window-control--expand"
+            id="window-expand"
+            type="button"
+            aria-label="Expand window"
+            title="Expand"
+          ></button>
+          <button
+            class="window-control window-control--close"
+            id="window-close"
+            type="button"
+            aria-label="Close window"
+            title="Close"
+          ></button>
+        </div>
+      </header>
+      <section class="workspace home-screen" id="home-screen" aria-label="Anvil home">
+        <aside class="recent-projects" aria-labelledby="recent-projects-title">
+          <div class="section-heading">
+            <p class="section-kicker">Recent Projects</p>
+            <h1 id="recent-projects-title">Recent projects</h1>
+          </div>
+          <div
+            class="project-list"
+            id="recent-project-list"
+            aria-live="polite"
+            aria-label="Recent texture pack projects"
+          ></div>
+          <button class="secondary-button show-all-projects" id="show-all-projects" type="button" hidden>
+            Show all
+          </button>
+        </aside>
+
+        <section class="quick-actions" aria-label="Project actions">
+          <button class="action-button action-button--primary" id="create-project" type="button">
+            <span class="action-mark">+</span>
+            <span>Create Project</span>
+          </button>
+          <button class="action-button" id="open-project" type="button">
+            <span class="action-mark action-mark--open">↗</span>
+            <span>Open Project</span>
+          </button>
+          <button class="action-button" id="report-issue" type="button">
+            <span class="action-mark action-mark--report"></span>
+            <span>Report an Issue</span>
+          </button>
+        </section>
+
+        <aside class="community-panel" aria-labelledby="community-title">
+          <div class="section-heading">
+            <p class="section-kicker">Open Source</p>
+            <h1 id="community-title">Community</h1>
+          </div>
+          <a
+            class="repo-card"
+            id="repo-card"
+            href="https://github.com/NssIs/Anvil"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <span class="repo-mark" aria-hidden="true">★</span>
+            <span class="repo-copy">
+              <strong>NssIs/Anvil</strong>
+              <small id="repo-meta">View the project on GitHub</small>
+            </span>
+            <span class="repo-arrow" aria-hidden="true">↗</span>
+          </a>
+          <p class="contributors-label">Contributors</p>
+          <div class="contributors-list" id="contributors-list" aria-live="polite">
+            <p class="contributors-empty">Loading contributors…</p>
+          </div>
+          <p class="legal-note">
+            MIT-licensed. Not affiliated with Mojang or Microsoft — Minecraft and its
+            textures are © Mojang Studios.
+          </p>
+        </aside>
+      </section>
+
+      <section
+        class="project-workspace"
+        id="project-workspace"
+        aria-label="Texture pack workspace"
+        hidden
+      >
+        <aside class="workspace-sidebar">
+          <div class="workspace-project-card">
+            <div class="workspace-project-icon" id="workspace-project-icon">TP</div>
+            <div>
+              <p class="section-kicker">Texture Pack</p>
+              <h1 id="workspace-project-name">Untitled Pack</h1>
+            </div>
+          </div>
+          <div class="workspace-stat-grid">
+            <div>
+              <span id="asset-count">0</span>
+              <small>Assets</small>
+            </div>
+            <div>
+              <span id="edited-count">0</span>
+              <small>Edited</small>
+            </div>
+          </div>
+          <nav class="workspace-nav" aria-label="Asset filters">
+            <button class="workspace-nav-item is-active" type="button" data-filter="all">
+              All assets
+            </button>
+            <button class="workspace-nav-item" type="button" data-filter="block">
+              Blocks
+            </button>
+            <button class="workspace-nav-item" type="button" data-filter="item">
+              Items
+            </button>
+            <button class="workspace-nav-item" type="button" data-filter="entity">
+              Entities
+            </button>
+            <button class="workspace-nav-item" type="button" data-filter="other">
+              Other
+            </button>
+            <button class="workspace-nav-item" type="button" data-filter="edited">
+              Edited
+            </button>
+          </nav>
+          <button class="create-button sidebar-new-texture" id="new-texture" type="button">
+            <span class="sidebar-new-texture-mark" aria-hidden="true">+</span>
+            New texture
+          </button>
+          <button class="return-button" id="return-main-menu" type="button">
+            Return to main menu
+          </button>
+        </aside>
+
+        <section class="asset-workbench">
+          <header class="workspace-toolbar">
+            <div class="workspace-title-block">
+              <p class="section-kicker">Workspace</p>
+              <h2>Textures</h2>
+            </div>
+            <label class="asset-search">
+              <span>Search assets</span>
+              <input
+                id="asset-search"
+                type="search"
+                placeholder="Search block, item, or entity"
+                autocomplete="off"
+              />
+            </label>
+            <button class="export-button" id="export-button" type="button">
+              Export
+            </button>
+          </header>
+
+          <div class="workspace-status" id="workspace-status" role="status">
+            Ready.
+          </div>
+          <div class="texture-loading" id="texture-loading" aria-hidden="true">
+            <div class="texture-loading-panel">
+              <div class="texture-loading-topline">
+                <span id="texture-loading-stage">Pulling textures</span>
+                <strong id="texture-loading-percent">0%</strong>
+              </div>
+              <div class="texture-progress-track" aria-hidden="true">
+                <span id="texture-progress-bar"></span>
+              </div>
+              <p id="texture-loading-message">Preparing Minecraft assets.</p>
+              <small id="texture-loading-eta">Estimating time...</small>
+            </div>
+          </div>
+          <div class="asset-grid" id="asset-grid" aria-label="Minecraft assets"></div>
+        </section>
+
+        <section class="editor-drawer" id="editor-drawer" aria-hidden="true">
+          <header class="editor-header">
+            <div class="editor-title-block">
+              <p class="section-kicker">Pixel Editor</p>
+              <h2 id="editor-title">Select an asset</h2>
+            </div>
+            <div class="editor-settings" aria-label="Canvas settings">
+              <label class="editor-field">
+                <span>Grid</span>
+                <input id="grid-size" type="number" min="8" max="128" step="8" value="16" inputmode="numeric" />
+              </label>
+              <label class="editor-field">
+                <span>Size</span>
+                <input id="brush-size" type="number" min="1" max="8" step="1" value="1" inputmode="numeric" />
+              </label>
+            </div>
+            <div class="editor-header-actions">
+              <button class="secondary-button" id="import-texture" type="button">
+                Import texture
+              </button>
+              <input id="import-file" type="file" accept="image/*" hidden />
+              <button class="secondary-button" id="discard-texture" type="button">
+                Discard changes
+              </button>
+              <button class="create-button" id="save-texture" type="button">Save texture</button>
+            </div>
+          </header>
+          <div class="editor-stage">
+            <aside class="editor-rail" aria-label="Drawing tools">
+              <div class="editor-tools">
+              <button
+                class="tool-button is-active"
+                type="button"
+                data-tool="pencil"
+                aria-label="Pencil"
+                title="Pencil"
+              >
+                <span class="tool-icon tool-icon--pencil"></span>
+                <span class="tool-label">Draw</span>
+              </button>
+              <button
+                class="tool-button"
+                type="button"
+                data-tool="erase"
+                aria-label="Erase"
+                title="Erase"
+              >
+                <span class="tool-icon tool-icon--erase"></span>
+                <span class="tool-label">Erase</span>
+              </button>
+              <button
+                class="tool-button"
+                type="button"
+                data-tool="picker"
+                aria-label="Pick color"
+                title="Pick color"
+              >
+                <span class="tool-icon tool-icon--picker"></span>
+                <span class="tool-label">Pick</span>
+              </button>
+              <button
+                class="tool-button"
+                type="button"
+                data-tool="recolor"
+                aria-label="Recolor (keeps shading)"
+                title="Recolor — repaints existing pixels in the target color while keeping their light/dark shading"
+              >
+                <span class="tool-icon tool-icon--recolor"></span>
+                <span class="tool-label">Recolor</span>
+              </button>
+              <button class="tool-button" id="undo-canvas" type="button" aria-label="Undo" title="Undo">
+                <span class="tool-icon tool-icon--undo"></span>
+                <span class="tool-label">Undo</span>
+              </button>
+              <button class="tool-button" id="clear-canvas" type="button" aria-label="Clear" title="Clear">
+                <span class="tool-icon tool-icon--clear"></span>
+                <span class="tool-label">Clear</span>
+              </button>
+              </div>
+              <div class="color-picker" id="color-picker">
+                <button
+                  class="color-preview"
+                  id="color-preview"
+                  type="button"
+                  aria-label="Open color picker"
+                  aria-expanded="false"
+                ></button>
+                <div class="color-popover" id="color-popover" aria-hidden="true">
+                  <div
+                    class="color-area"
+                    id="color-area"
+                    role="slider"
+                    aria-label="Saturation and brightness"
+                    tabindex="0"
+                  >
+                    <span class="color-area-handle" id="color-area-handle"></span>
+                  </div>
+                  <div
+                    class="color-hue"
+                    id="color-hue"
+                    role="slider"
+                    aria-label="Hue"
+                    tabindex="0"
+                  >
+                    <span class="color-hue-handle" id="color-hue-handle"></span>
+                  </div>
+                  <div class="color-swatches" aria-label="Color palette">
+                    <button type="button" data-editor-color="#7ee787" style="--swatch: #7ee787"></button>
+                    <button type="button" data-editor-color="#79c0ff" style="--swatch: #79c0ff"></button>
+                    <button type="button" data-editor-color="#ffce67" style="--swatch: #ffce67"></button>
+                    <button type="button" data-editor-color="#ff7b72" style="--swatch: #ff7b72"></button>
+                    <button type="button" data-editor-color="#d2a8ff" style="--swatch: #d2a8ff"></button>
+                    <button type="button" data-editor-color="#ffffff" style="--swatch: #ffffff"></button>
+                    <button type="button" data-editor-color="#8b949e" style="--swatch: #8b949e"></button>
+                    <button type="button" data-editor-color="#000000" style="--swatch: #000000"></button>
+                  </div>
+                  <label class="color-hex-field">
+                    <span>Hex</span>
+                    <input id="draw-color" type="text" value="#7ee787" maxlength="7" spellcheck="false" />
+                  </label>
+                </div>
+              </div>
+            </aside>
+            <div class="editor-canvas-wrap">
+              <canvas id="pixel-canvas" width="16" height="16" aria-label="Pixel canvas"></canvas>
+              <span class="pixel-cursor" id="pixel-cursor" aria-hidden="true"></span>
+            </div>
+            <aside class="editor-layers" aria-label="Layers">
+              <div class="layers-header">
+                <h3>Layers</h3>
+                <button
+                  class="layers-add"
+                  id="add-layer"
+                  type="button"
+                  aria-label="Add layer"
+                  title="Add layer"
+                >+</button>
+              </div>
+              <div class="layer-list" id="layer-list" role="list"></div>
+              <p class="layers-hint">Drag a layer to reorder · top layer paints over the ones below.</p>
+            </aside>
+          </div>
+        </section>
+
+        <div class="workspace-modal-backdrop" id="export-modal" aria-hidden="true">
+          <section
+            class="export-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="export-modal-title"
+          >
+            <div class="export-modal-topline">
+              <div>
+                <p class="section-kicker">Export</p>
+                <h2 id="export-modal-title">Resource pack preview</h2>
+              </div>
+            </div>
+            <div class="minecraft-pack-preview">
+              <div class="minecraft-pack-icon" id="export-pack-icon">TP</div>
+              <div class="minecraft-pack-copy">
+                <h3 id="export-pack-name">Untitled Pack</h3>
+                <p id="export-pack-description">A clean texture pack for survival worlds...</p>
+                <p id="export-pack-meta">Me! ° 1.0</p>
+              </div>
+            </div>
+            <label class="export-version-field">
+              <span>Pack version</span>
+              <input
+                id="export-version"
+                type="text"
+                placeholder="1.0"
+                autocomplete="off"
+              />
+            </label>
+            <div class="export-modal-actions">
+              <button class="secondary-button" id="cancel-export" type="button">Cancel</button>
+              <button class="create-button" id="confirm-export" type="button">
+                Export pack
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <div class="workspace-modal-backdrop" id="new-texture-modal" aria-hidden="true">
+          <section
+            class="export-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-texture-title"
+          >
+            <div class="export-modal-topline">
+              <div>
+                <p class="section-kicker">Texture</p>
+                <h2 id="new-texture-title">Create a new texture</h2>
+              </div>
+            </div>
+            <label class="export-version-field">
+              <span>Texture name</span>
+              <input
+                id="new-texture-name"
+                type="text"
+                placeholder="my_texture"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </label>
+            <div class="export-version-field">
+              <span>Folder (where it lives in the pack)</span>
+              <div class="custom-select" id="new-texture-kind">
+                <button
+                  class="custom-select-trigger"
+                  id="new-texture-kind-trigger"
+                  type="button"
+                  aria-haspopup="listbox"
+                  aria-expanded="false"
+                >
+                  <span id="new-texture-kind-label">block</span>
+                  <span class="custom-select-caret" aria-hidden="true"></span>
+                </button>
+                <div
+                  class="custom-select-menu"
+                  id="new-texture-kind-menu"
+                  role="listbox"
+                  aria-hidden="true"
+                ></div>
+              </div>
+            </div>
+            <p class="new-texture-path" id="new-texture-path">
+              assets/minecraft/textures/<span id="new-texture-path-value">block/my_texture.png</span>
+            </p>
+            <small class="version-status" id="new-texture-status">
+              Lowercase letters, numbers, _, - and / only.
+            </small>
+            <div class="export-modal-actions">
+              <button class="secondary-button" id="cancel-new-texture" type="button">Cancel</button>
+              <button class="create-button" id="confirm-new-texture" type="button">
+                Create texture
+              </button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <div class="modal-backdrop" id="project-modal" aria-hidden="true">
+        <section
+          class="project-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="project-modal-title"
+        >
+          <aside class="project-types" aria-label="Project type">
+            <button class="project-type project-type--active" type="button">
+              <span class="type-icon type-icon--texture">TP</span>
+              <span>Texture Pack</span>
+            </button>
+            <p class="type-status">Coming soon</p>
+            <button class="project-type" type="button" disabled>
+              <span class="type-icon type-icon--mods">M</span>
+              <span>Mods</span>
+            </button>
+            <button class="project-type" type="button" disabled>
+              <span class="type-icon type-icon--shaders">S</span>
+              <span>Shaders</span>
+            </button>
+            <button class="project-type" type="button" disabled>
+              <span class="type-icon type-icon--plugins">P</span>
+              <span>Plugins</span>
+            </button>
+          </aside>
+
+          <form class="project-form">
+            <div class="form-topline">
+              <div>
+                <p class="section-kicker">New Project</p>
+                <h2 id="project-modal-title">Texture pack</h2>
+              </div>
+              <button class="icon-button" id="modal-x" type="button" aria-label="Close">
+                <span></span>
+              </button>
+            </div>
+
+            <div class="identity-row">
+              <label class="name-field">
+                <span>Texture pack name</span>
+                <input
+                  id="pack-name"
+                  name="name"
+                  type="text"
+                  maxlength="32"
+                  required
+                  placeholder="Nightfall Tweaks"
+                  autocomplete="off"
+                />
+                <small><span id="pack-name-count">0</span>/32</small>
+              </label>
+
+              <label class="icon-uploader" for="pack-icon">
+                <input id="pack-icon" type="file" accept="image/*" />
+                <span class="icon-preview" id="icon-preview" aria-hidden="true"></span>
+                <span class="upload-copy">
+                  <span>Upload your icon</span>
+                  <small>50x50 PNG</small>
+                </span>
+              </label>
+            </div>
+
+            <div class="meta-grid">
+              <label>
+                <span>Author</span>
+                <input id="pack-author" name="author" type="text" placeholder="Me!" autocomplete="off" />
+              </label>
+              <div class="version-field">
+                <span>Minecraft version</span>
+                <div class="version-combobox" id="version-combobox">
+                  <input
+                    id="minecraft-version"
+                    name="minecraft-version"
+                    type="text"
+                    placeholder="1.16.5"
+                    autocomplete="off"
+                    aria-controls="version-menu"
+                    aria-expanded="false"
+                  />
+                  <button
+                    class="version-toggle"
+                    id="version-toggle"
+                    type="button"
+                    aria-label="Show Minecraft versions"
+                  ></button>
+                  <div
+                    class="version-menu"
+                    id="version-menu"
+                    aria-hidden="true"
+                    aria-label="Minecraft version presets"
+                  ></div>
+                </div>
+                <small class="version-status" id="version-status">Example: 1.16.5</small>
+              </div>
+            </div>
+
+            <div class="description-field">
+              <span>Description</span>
+              <div class="format-toolbar" aria-label="Minecraft formatting">
+                <button type="button" class="swatch swatch--black" data-code="§0" aria-label="Black"></button>
+                <button type="button" class="swatch swatch--blue" data-code="§1" aria-label="Dark blue"></button>
+                <button type="button" class="swatch swatch--green" data-code="§2" aria-label="Dark green"></button>
+                <button type="button" class="swatch swatch--red" data-code="§4" aria-label="Dark red"></button>
+                <button type="button" class="swatch swatch--gold" data-code="§6" aria-label="Gold"></button>
+                <button type="button" class="swatch swatch--aqua" data-code="§b" aria-label="Aqua"></button>
+                <button type="button" class="swatch swatch--purple" data-code="§d" aria-label="Light purple"></button>
+                <button type="button" class="swatch swatch--white" data-code="§f" aria-label="White"></button>
+                <button type="button" class="format-button" data-code="§l">B</button>
+                <button type="button" class="format-button format-button--italic" data-code="§o">I</button>
+                <button type="button" class="format-button format-button--underline" data-code="§n">U</button>
+                <button type="button" class="format-button" data-code="§r">R</button>
+              </div>
+              <div
+                id="pack-description"
+                class="description-editor"
+                role="textbox"
+                aria-multiline="true"
+                contenteditable="true"
+                data-placeholder="A clean texture pack for survival worlds."
+              ></div>
+              <small class="description-count">
+                <span id="description-count">0</span>/160
+              </small>
+              <input id="pack-description-value" name="description" type="hidden" />
+            </div>
+
+            <div class="modal-actions">
+              <button class="secondary-button" id="cancel-project" type="button">Cancel</button>
+              <button class="create-button" type="submit">Create</button>
+            </div>
+          </form>
+        </section>
+      </div>
+
+      <div class="modal-backdrop" id="delete-modal" aria-hidden="true">
+        <section
+          class="delete-modal"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="delete-modal-title"
+          aria-describedby="delete-body"
+        >
+          <div class="form-topline">
+            <div>
+              <p class="section-kicker delete-kicker">Delete project</p>
+              <h2 id="delete-modal-title">Delete texture pack</h2>
+            </div>
+            <button class="icon-button" id="close-delete" type="button" aria-label="Close">
+              <span></span>
+            </button>
+          </div>
+          <p class="delete-warning">
+            <strong>This will remove the folder and all of its files.</strong>
+          </p>
+          <p class="delete-body" id="delete-body">
+            Deleting this texture pack erases its saved textures and project data from this
+            computer. This action cannot be undone.
+          </p>
+          <div class="modal-actions">
+            <button class="secondary-button" id="cancel-delete" type="button">Cancel</button>
+            <button
+              class="create-button delete-confirm-button"
+              id="confirm-delete"
+              type="button"
+              disabled
+            >
+              Delete in 3…
+            </button>
+          </div>
+        </section>
+      </div>
+
+      <div class="modal-backdrop" id="project-library-modal" aria-hidden="true">
+        <section
+          class="project-library-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="project-library-title"
+        >
+          <div class="library-header">
+            <div class="library-heading">
+              <p class="section-kicker">Projects</p>
+              <h2 id="project-library-title">All texture packs</h2>
+            </div>
+            <label class="library-search">
+              <input
+                id="library-search"
+                type="search"
+                placeholder="Search texture packs…"
+                autocomplete="off"
+              />
+            </label>
+            <button class="icon-button" id="close-project-library" type="button" aria-label="Close">
+              <span></span>
+            </button>
+          </div>
+          <div class="project-grid" id="project-library-list" aria-live="polite"></div>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>
