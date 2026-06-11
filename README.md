@@ -2,7 +2,7 @@
 
 Anvil is a desktop toolkit for Minecraft creators, built with [Tauri](https://tauri.app/)
 (Rust) and a vanilla TypeScript front-end. Its first available workspace is a
-fast texture-pack editor: create a pack, pull the vanilla textures for a chosen
+fast resource-pack editor: create a pack, pull the vanilla textures for a chosen
 Minecraft version, paint over the ones you want to change with a layered pixel
 editor, and export a ready-to-use resource pack — only the textures you actually
 edited are included in the export. Mod, shader, and plugin tooling are planned
@@ -47,6 +47,18 @@ Anvil's source code is released under the [MIT License](./LICENSE) —
 Copyright (c) 2026 NssIs. You are free to use, modify, and distribute the
 **code**.
 
+## Project policies
+
+- **[Privacy Policy](./PRIVACY.md)** — no telemetry, no servers, no data
+  collection; what the app stores locally and which services it contacts
+  (updater, Mojang downloads, optional AI providers).
+- **[Security Policy](./SECURITY.md)** — supported versions, how to report
+  vulnerabilities privately, current hardening status.
+- **[Asset, Content & Trademark Policy](./ASSET_POLICY.md)** — how Anvil
+  handles Mojang's assets and what you're responsible for when sharing packs.
+- **[Contributing Guide](./CONTRIBUTING.md)** and
+  **[Code of Conduct](./CODE_OF_CONDUCT.md)** — how to take part.
+
 ## Minecraft assets & trademark
 
 > **NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH
@@ -74,3 +86,6 @@ any rights to Minecraft or its assets:
   [Minecraft EULA](https://www.minecraft.net/en-us/eula) and
   [Usage Guidelines](https://www.minecraft.net/en-us/usage-guidelines)
   (e.g. no selling packs of Mojang's assets).
+
+The full policy, including user content, AI-assisted content, and
+trademarks, is in [ASSET_POLICY.md](./ASSET_POLICY.md).

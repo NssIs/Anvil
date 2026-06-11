@@ -1,8 +1,22 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { parseAiReply } from "./aiReply";
+import { newAiStreamId, onAiStream } from "./aiStream";
+import { showScreen } from "./screenTransition";
 
 type AssetKind = "block" | "item" | "entity" | "other";
-type Tool = "pencil" | "erase" | "picker" | "recolor" | "move";
+type Tool =
+  | "pencil"
+  | "erase"
+  | "picker"
+  | "recolor"
+  | "move"
+  | "fill"
+  | "line"
+  | "rect"
+  | "ellipse";
+
+const SHAPE_TOOLS = new Set<Tool>(["line", "rect", "ellipse"]);
 
 type FloatingPixel = { relX: number; relY: number; color: string };
 type MovePhase = "selecting" | "placed" | "moving";
@@ -96,10 +110,113 @@ type WorkspaceState = {
     layers: Layer[];
     activeLayerId: string;
     history: EditorSnapshot[];
+    redo: EditorSnapshot[];
+    recentColors: string[];
+    zoom: number;
+    showGrid: boolean;
     dirty: boolean;
     drawing: boolean;
   };
 };
+
+type ResourceAiPendingImage = { id: string; name: string; url: string; size: number; mimeType: string };
+type ResourceAiProvider = "ollama" | "openrouter" | "gemini";
+type ResourceAiConfig = {
+  provider: ResourceAiProvider;
+  baseUrl?: string;
+  apiKey?: string;
+  model: string;
+};
+type TextureAiImage = { name: string; mimeType: string; dataUrl: string };
+type TextureAiBackendResponse = { text: string; promptTokens?: number | null; totalTokens?: number | null };
+type TextureAiPixelEdit = { x: number; y: number; color: string };
+type TextureAiAssetEdit = {
+  assetId?: string;
+  asset_id?: string;
+  texturePath?: string;
+  texture_path?: string;
+  pixels?: TextureAiPixelEdit[];
+};
+type TextureAiDataRequest = {
+  type?: string;
+  assetId?: string;
+  asset_id?: string;
+  query?: string;
+};
+type TextureAiResult = {
+  reply?: string;
+  message?: string;
+  requests?: TextureAiDataRequest[];
+  edits?: TextureAiAssetEdit[];
+};
+
+const ASSET_TILE_WIDTH = 132;
+const ASSET_TILE_HEIGHT = 132;
+const ASSET_GRID_GAP = 10;
+const ASSET_GRID_HORIZONTAL_PADDING = 28;
+const ASSET_GRID_BUFFER_ROWS = 4;
+const RESOURCE_AI_PANEL_TRANSITION_MS = 220;
+const RESOURCE_AI_CONFIG_STORAGE_KEY = "anvil.resourceAi.config";
+const TEXTURE_AI_PIXEL_LIMIT = 1024;
+const RESOURCE_AI_PROVIDERS: Record<
+  ResourceAiProvider,
+  {
+    title: string;
+    badge: string;
+    badgeClass: string;
+    model: string;
+    baseUrl: string;
+    apiKeyRequired: boolean;
+    showBaseUrl: boolean;
+    models: string[];
+  }
+> = {
+  ollama: {
+    title: "Local model",
+    badge: "LOCAL",
+    badgeClass: "ai-provider-badge--local",
+    model: "llama3.2",
+    baseUrl: "http://localhost:11434",
+    apiKeyRequired: false,
+    showBaseUrl: true,
+    models: ["llama3.2", "llava", "qwen2.5", "gemma3"],
+  },
+  openrouter: {
+    title: "OpenRouter API",
+    badge: "API",
+    badgeClass: "ai-provider-badge--api",
+    model: "openai/gpt-4o-mini",
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKeyRequired: true,
+    showBaseUrl: false,
+    models: [
+      "openai/gpt-4o-mini",
+      "openai/gpt-4o",
+      "google/gemini-2.0-flash-exp",
+      "meta-llama/llama-3.2-11b-vision-instruct",
+    ],
+  },
+  gemini: {
+    title: "AI Studio API",
+    badge: "API",
+    badgeClass: "ai-provider-badge--api",
+    model: "gemini-2.5-flash",
+    baseUrl: "https://generativelanguage.googleapis.com",
+    apiKeyRequired: true,
+    showBaseUrl: false,
+    models: [
+      "gemini-2.5-flash",
+      "gemini-2.5-pro",
+      "gemini-2.0-flash",
+      "gemma-4-26b-a4b-it",
+      "gemma-4-31b-it",
+    ],
+  },
+};
+
+function isResourceAiProvider(value: unknown): value is ResourceAiProvider {
+  return value === "ollama" || value === "openrouter" || value === "gemini";
+}
 
 const mockAssets: WorkspaceAsset[] = [
   { id: "block/stone", name: "Stone", kind: "block", texturePath: "block/stone.png" },
@@ -192,6 +309,36 @@ function cloneLayer(layer: Layer): Layer {
   };
 }
 
+// Cache hex -> [r,g,b] so the hot render loop never re-parses a colour string.
+// Pixel art reuses a small palette, so this Map stays tiny and hits constantly.
+const hexColorCache = new Map<string, [number, number, number]>();
+
+function parseHexColor(hex: string): [number, number, number] {
+  const cached = hexColorCache.get(hex);
+
+  if (cached) {
+    return cached;
+  }
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (hex.length === 7 && hex.charCodeAt(0) === 35) {
+    r = parseInt(hex.slice(1, 3), 16);
+    g = parseInt(hex.slice(3, 5), 16);
+    b = parseInt(hex.slice(5, 7), 16);
+  } else if (hex.length === 4 && hex.charCodeAt(0) === 35) {
+    r = parseInt(hex[1] + hex[1], 16);
+    g = parseInt(hex[2] + hex[2], 16);
+    b = parseInt(hex[3] + hex[3], 16);
+  }
+
+  const rgb: [number, number, number] = [r || 0, g || 0, b || 0];
+  hexColorCache.set(hex, rgb);
+  return rgb;
+}
+
 function compositeLayers(layers: Layer[], size: number) {
   const result = createPixels(size);
 
@@ -203,11 +350,15 @@ function compositeLayers(layers: Layer[], size: number) {
       continue;
     }
 
-    layer.pixels.forEach((color, pixelIndex) => {
+    const pixels = layer.pixels;
+
+    for (let i = 0; i < pixels.length; i += 1) {
+      const color = pixels[i];
+
       if (color) {
-        result[pixelIndex] = color;
+        result[i] = color;
       }
-    });
+    }
   }
 
   return result;
@@ -403,9 +554,7 @@ async function callBackend<T>(command: string, args: Record<string, unknown>, fa
 }
 
 export function initWorkspace() {
-  const homeScreen = document.getElementById("home-screen");
   const workspaceScreen = document.getElementById("project-workspace");
-  const shaderWorkspace = document.getElementById("shader-workspace");
   const assetGrid = document.getElementById("asset-grid");
   const assetSearch = document.getElementById("asset-search") as HTMLInputElement | null;
   const assetCount = document.getElementById("asset-count");
@@ -440,6 +589,9 @@ export function initWorkspace() {
   const brushSize = document.getElementById("brush-size") as HTMLInputElement | null;
   const layerList = document.getElementById("layer-list");
   const selectionOverlay = document.getElementById("selection-overlay");
+  const gridOverlay = document.getElementById("pixel-grid-overlay");
+  const canvasWrap = document.getElementById("editor-canvas-wrap");
+  const recentColorsEl = document.getElementById("recent-colors");
   const toolTooltip = document.getElementById("tool-tooltip");
   const toolTooltipName = toolTooltip?.querySelector<HTMLElement>(".tool-tooltip-name") ?? null;
   const toolTooltipShortcut = toolTooltip?.querySelector<HTMLElement>(".tool-tooltip-shortcut") ?? null;
@@ -452,9 +604,70 @@ export function initWorkspace() {
   const newTextureKindMenu = document.getElementById("new-texture-kind-menu");
   const newTexturePathValue = document.getElementById("new-texture-path-value");
   const newTextureStatus = document.getElementById("new-texture-status");
+  const resourceWorkbench = document.getElementById("resource-workbench");
+  // Relocate the pixel editor into the workbench grid so it opens in the asset
+  // column while the AI panel stays put in its own column — same active panel,
+  // never moved or duplicated.
+  if (editorDrawer && resourceWorkbench) {
+    resourceWorkbench.appendChild(editorDrawer);
+  }
+  const resourceAiThread = document.getElementById("resource-ai-thread");
+  const resourceAiInput = document.getElementById("resource-ai-input") as HTMLTextAreaElement | null;
+  const resourceAiSend = document.getElementById("resource-ai-send") as HTMLButtonElement | null;
+  const resourceAiPlus = document.getElementById("resource-ai-plus") as HTMLButtonElement | null;
+  const resourceAiImageInput = document.getElementById("resource-ai-image-input") as HTMLInputElement | null;
+  const resourceAiNewConversation = document.getElementById("resource-ai-new-conversation") as HTMLButtonElement | null;
+  const resourceAiToggle = document.getElementById("resource-ai-toggle") as HTMLButtonElement | null;
+  const resourceAiContextStatus = document.getElementById("resource-ai-context-status");
+  const resourceAiSetupModal = document.getElementById("resource-ai-setup-modal");
+  const resourceAiSetupForm = document.getElementById("resource-ai-setup-form") as HTMLFormElement | null;
+  const resourceAiSetupClose = document.getElementById("resource-ai-setup-close") as HTMLButtonElement | null;
+  const resourceAiCancelSetup = document.getElementById("resource-ai-cancel-setup") as HTMLButtonElement | null;
+  const resourceAiSetupProviderTitle = document.getElementById("resource-ai-setup-provider-title");
+  const resourceAiSetupProviderIcon = document.getElementById("resource-ai-setup-provider-icon");
+  const resourceAiBaseUrlField = document.getElementById("resource-ai-base-url-field");
+  const resourceAiBaseUrlInput = document.getElementById("resource-ai-base-url") as HTMLInputElement | null;
+  const resourceAiApiKeyField = document.getElementById("resource-ai-api-key-field");
+  const resourceAiApiKeyInput = document.getElementById("resource-ai-api-key") as HTMLInputElement | null;
+  const resourceAiModelInput = document.getElementById("resource-ai-model") as HTMLInputElement | null;
+  const resourceAiModelPresets = document.getElementById("resource-ai-model-presets");
   let newTextureFolder = "block";
   let loadingStartedAt = 0;
   let editorColorHsv: Hsv = { h: 134, s: 0.66, v: 0.91 };
+  let renderedAssets: WorkspaceAsset[] = [];
+  let renderedAssetWindow = "";
+  let assetScrollFrame = 0;
+  let resourceAiAttachedImageBytes = 0;
+  let resourceAiPendingImages: ResourceAiPendingImage[] = [];
+  let resourceAiPendingImageSeq = 0;
+  let resourceAiPanelTimer = 0;
+  let resourceAiPanelFrame = 0;
+  let resourceAiSelectedProvider: ResourceAiProvider = "ollama";
+  let resourceAiRequestActive = false;
+  // Bumped on every send and on Stop. An in-flight request whose token no longer
+  // matches is abandoned (the backend HTTP call can't be cancelled, but its
+  // result is ignored).
+  let resourceAiRequestToken = 0;
+  // Exact tokens the provider reported for the last request (null before any).
+  let resourceAiLastTotalTokens: number | null = null;
+  const resourceAiImageWarning = document.getElementById("resource-ai-image-warning");
+  // Persistent per-asset tile cache. The grid is virtualized, but rebuilding a
+  // tile means recreating its <img> and re-decoding the texture from disk every
+  // time it scrolls back into view — the source of the scroll lag. Keeping the
+  // built tile (and its already-decoded image) alive lets scrolling just move
+  // existing nodes. A tile is only rebuilt when its texture or edited state
+  // actually changes.
+  const assetTileCache = new Map<
+    string,
+    { el: HTMLElement; previewUrl: string; edited: boolean }
+  >();
+  let assetGridTopSpacer: HTMLDivElement | null = null;
+  let assetGridWindow: HTMLDivElement | null = null;
+  let assetGridBottomSpacer: HTMLDivElement | null = null;
+  let assetGridEmpty: HTMLParagraphElement | null = null;
+  let assetGridColumnCount = 1;
+  let assetGridVisibleRowCount = ASSET_GRID_BUFFER_ROWS * 2 + 1;
+  let renderedAssetSignature = "";
 
   const state: WorkspaceState = {
     assets: [],
@@ -477,6 +690,10 @@ export function initWorkspace() {
       layers: [],
       activeLayerId: "",
       history: [],
+      redo: [],
+      recentColors: [],
+      zoom: 1,
+      showGrid: false,
       dirty: false,
       drawing: false,
     },
@@ -489,6 +706,1024 @@ export function initWorkspace() {
   const setStatus = (message: string) => {
     if (workspaceStatus) {
       workspaceStatus.textContent = message;
+    }
+  };
+
+  const readResourceAiConfig = (): ResourceAiConfig | null => {
+    try {
+      const raw = window.localStorage.getItem(RESOURCE_AI_CONFIG_STORAGE_KEY);
+
+      if (!raw) {
+        return null;
+      }
+
+      const parsed = JSON.parse(raw) as Partial<ResourceAiConfig>;
+      const provider = parsed.provider;
+
+      if (!isResourceAiProvider(provider)) {
+        return null;
+      }
+
+      const model = String(parsed.model ?? "").trim();
+      const settings = RESOURCE_AI_PROVIDERS[provider];
+      const apiKey = String(parsed.apiKey ?? "").trim();
+
+      if (!model || (settings.apiKeyRequired && !apiKey)) {
+        return null;
+      }
+
+      return {
+        provider,
+        baseUrl: String(parsed.baseUrl ?? settings.baseUrl).trim() || settings.baseUrl,
+        apiKey,
+        model,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const saveResourceAiConfig = (config: ResourceAiConfig) => {
+    window.localStorage.setItem(RESOURCE_AI_CONFIG_STORAGE_KEY, JSON.stringify(config));
+  };
+
+  const syncResourceAiModelPresets = () => {
+    if (!resourceAiModelPresets) {
+      return;
+    }
+
+    const current = resourceAiModelInput?.value.trim() ?? "";
+    resourceAiModelPresets.querySelectorAll<HTMLButtonElement>("button").forEach((chip) => {
+      chip.classList.toggle("is-active", chip.dataset.model === current);
+    });
+  };
+
+  const renderResourceAiModelPresets = (provider: ResourceAiProvider) => {
+    if (!resourceAiModelPresets) {
+      return;
+    }
+
+    const settings = RESOURCE_AI_PROVIDERS[provider];
+    resourceAiModelPresets.textContent = "";
+
+    settings.models.forEach((model) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "ai-model-chip";
+      chip.dataset.model = model;
+      chip.textContent = model;
+      chip.addEventListener("click", () => {
+        if (resourceAiModelInput) {
+          resourceAiModelInput.value = model;
+        }
+        syncResourceAiModelPresets();
+        resourceAiModelInput?.focus();
+      });
+      resourceAiModelPresets.append(chip);
+    });
+
+    syncResourceAiModelPresets();
+  };
+
+  const selectResourceAiProvider = (provider: ResourceAiProvider) => {
+    resourceAiSelectedProvider = provider;
+    const saved = readResourceAiConfig();
+    const settings = RESOURCE_AI_PROVIDERS[provider];
+
+    document.querySelectorAll<HTMLButtonElement>("[data-ai-provider]").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.aiProvider === provider);
+    });
+
+    if (resourceAiSetupProviderTitle) {
+      resourceAiSetupProviderTitle.textContent = settings.title;
+    }
+
+    if (resourceAiSetupProviderIcon) {
+      resourceAiSetupProviderIcon.className = `ai-provider-badge ${settings.badgeClass}`;
+      resourceAiSetupProviderIcon.textContent = settings.badge;
+    }
+
+    if (resourceAiBaseUrlField) {
+      resourceAiBaseUrlField.hidden = !settings.showBaseUrl;
+    }
+
+    if (resourceAiApiKeyField) {
+      resourceAiApiKeyField.hidden = !settings.apiKeyRequired;
+    }
+
+    if (resourceAiBaseUrlInput) {
+      resourceAiBaseUrlInput.value =
+        saved?.provider === provider ? saved.baseUrl ?? settings.baseUrl : settings.baseUrl;
+    }
+
+    if (resourceAiApiKeyInput) {
+      resourceAiApiKeyInput.value = saved?.provider === provider ? saved.apiKey ?? "" : "";
+      resourceAiApiKeyInput.placeholder = settings.apiKeyRequired ? "Required" : "Not needed";
+    }
+
+    if (resourceAiModelInput) {
+      resourceAiModelInput.value = saved?.provider === provider ? saved.model : settings.model;
+    }
+
+    renderResourceAiModelPresets(provider);
+
+    if (resourceAiSetupForm) {
+      resourceAiSetupForm.hidden = false;
+      // Re-trigger the swap animation so switching providers eases the new
+      // fields in instead of snapping them.
+      resourceAiSetupForm.classList.remove("is-swapping");
+      void resourceAiSetupForm.offsetWidth;
+      resourceAiSetupForm.classList.add("is-swapping");
+    }
+  };
+
+  const openResourceAiSetup = () => {
+    const saved = readResourceAiConfig();
+    selectResourceAiProvider(saved?.provider ?? resourceAiSelectedProvider);
+    resourceAiSetupModal?.setAttribute("aria-hidden", "false");
+    window.requestAnimationFrame(() => resourceAiModelInput?.focus());
+  };
+
+  const closeResourceAiSetup = () => {
+    resourceAiSetupModal?.setAttribute("aria-hidden", "true");
+  };
+
+  const configuredResourceAi = () => {
+    const config = readResourceAiConfig();
+
+    if (!config) {
+      openResourceAiSetup();
+      setStatus("Set the AI up.");
+      return null;
+    }
+
+    return config;
+  };
+
+  const updateResourceAiContext = () => {
+    if (!resourceAiContextStatus) {
+      return;
+    }
+
+    // Running total for this conversation: provider-reported counts when
+    // available, ~4 chars/token estimates otherwise — hence the "~".
+    resourceAiContextStatus.textContent =
+      resourceAiLastTotalTokens == null
+        ? "No tokens used yet"
+        : `~${resourceAiLastTotalTokens.toLocaleString()} tokens used`;
+  };
+
+  const resizeResourceAiInput = () => {
+    if (!resourceAiInput) {
+      return;
+    }
+
+    resourceAiInput.style.height = "auto";
+    resourceAiInput.style.height = `${Math.min(resourceAiInput.scrollHeight, 96)}px`;
+  };
+
+  const syncResourceAiSend = () => {
+    if (resourceAiSend) {
+      // While a request is active the button stays enabled so it can act as Stop.
+      resourceAiSend.disabled = resourceAiRequestActive
+        ? false
+        : !resourceAiInput?.value.trim() && resourceAiPendingImages.length === 0;
+    }
+  };
+
+  const updateResourceAiSendMode = () => {
+    if (!resourceAiSend) {
+      return;
+    }
+    const icon = resourceAiSend.querySelector("span");
+    resourceAiSend.classList.toggle("is-stop", resourceAiRequestActive);
+    resourceAiSend.setAttribute("aria-label", resourceAiRequestActive ? "Stop generating" : "Send to assistant");
+    if (icon) {
+      icon.textContent = resourceAiRequestActive ? "■" : "↑";
+    }
+  };
+
+  const stopResourceAiRequest = () => {
+    if (!resourceAiRequestActive) {
+      return;
+    }
+    resourceAiRequestToken += 1; // invalidate the in-flight request and any stream
+    resourceAiRequestActive = false;
+    resourceAiThread
+      ?.querySelectorAll(".ai-typing")
+      .forEach((node) => node.closest(".ai-message")?.remove());
+    resourceAiThread
+      ?.querySelectorAll(".ai-bubble.is-streaming")
+      .forEach((node) => node.classList.remove("is-streaming"));
+    setStatus("Stopped.");
+    syncResourceAiSend();
+    updateResourceAiSendMode();
+  };
+
+  // Best-effort: does the configured model accept image input? Used only to warn,
+  // never to block — the user can always send anyway.
+  const resourceModelSupportsImages = (model: string) => {
+    const name = model.toLowerCase();
+    const visionTokens = [
+      "llava",
+      "bakllava",
+      "vision",
+      "-vl",
+      "vl-",
+      "moondream",
+      "minicpm-v",
+      "pixtral",
+      "internvl",
+      "molmo",
+      "gpt-4o",
+      "gpt-4.1",
+      "o3",
+      "o4-mini",
+      "claude-3",
+      "claude-4",
+      "claude-opus",
+      "claude-sonnet",
+      "gemini",
+      "gemma-3",
+      "gemma-4",
+      "gemma3",
+    ];
+    return visionTokens.some((token) => name.includes(token));
+  };
+
+  const updateResourceAiImageWarning = () => {
+    if (!resourceAiImageWarning) {
+      return;
+    }
+    if (resourceAiPendingImages.length === 0) {
+      resourceAiImageWarning.hidden = true;
+      return;
+    }
+    const config = readResourceAiConfig();
+    const supported = config ? resourceModelSupportsImages(config.model) : true;
+    resourceAiImageWarning.hidden = supported;
+    if (!supported && config) {
+      resourceAiImageWarning.textContent = `⚠ ${config.model} may not read images`;
+    }
+  };
+
+  const renderResourceAiPendingImages = () => {
+    const pendingAttachments = document.getElementById("resource-ai-pending-attachments");
+    if (!pendingAttachments) {
+      return;
+    }
+
+    pendingAttachments.textContent = "";
+    pendingAttachments.hidden = resourceAiPendingImages.length === 0;
+    updateResourceAiImageWarning();
+
+    resourceAiPendingImages.forEach((pending) => {
+      const item = document.createElement("div");
+      item.className = "ai-pending-image";
+
+      const image = document.createElement("img");
+      image.src = pending.url;
+      image.alt = pending.name;
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `Remove ${pending.name}`);
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        resourceAiPendingImages = resourceAiPendingImages.filter((entry) => entry.id !== pending.id);
+        renderResourceAiPendingImages();
+        syncResourceAiSend();
+        updateResourceAiContext();
+      });
+
+      item.append(image, remove);
+      pendingAttachments.append(item);
+    });
+  };
+
+  const scrollResourceAiThread = () => {
+    if (resourceAiThread) {
+      resourceAiThread.scrollTop = resourceAiThread.scrollHeight;
+    }
+  };
+
+  const resetResourceAiConversation = () => {
+    // Abandon any in-flight request/stream so the panel never gets stuck in the
+    // "active/stop" state after a new conversation or leaving and re-entering.
+    resourceAiRequestToken += 1;
+    resourceAiRequestActive = false;
+
+    if (resourceAiThread) {
+      resourceAiThread.textContent = "";
+    }
+    if (resourceAiInput) {
+      resourceAiInput.value = "";
+      resizeResourceAiInput();
+    }
+    resourceAiAttachedImageBytes = 0;
+    resourceAiPendingImages = [];
+    resourceAiLastTotalTokens = null;
+    renderResourceAiPendingImages();
+    updateResourceAiImageWarning();
+    updateResourceAiSendMode(); // restore the ↑ icon if it was a ■ Stop
+    syncResourceAiSend();
+    updateResourceAiContext();
+  };
+
+  const setResourceAiCollapsed = (collapsed: boolean) => {
+    if (!resourceWorkbench) {
+      return;
+    }
+
+    window.clearTimeout(resourceAiPanelTimer);
+    if (resourceAiPanelFrame) {
+      window.cancelAnimationFrame(resourceAiPanelFrame);
+      resourceAiPanelFrame = 0;
+    }
+
+    resourceWorkbench.classList.remove("is-ai-collapsing", "is-ai-expanding");
+    resourceAiToggle?.setAttribute("aria-expanded", String(!collapsed));
+    resourceAiToggle?.setAttribute("aria-label", collapsed ? "Expand AI" : "Collapse AI");
+
+    if (collapsed) {
+      if (resourceWorkbench.classList.contains("is-ai-collapsed")) {
+        return;
+      }
+
+      resourceWorkbench.classList.add("is-ai-collapsing");
+      resourceAiPanelTimer = window.setTimeout(() => {
+        resourceWorkbench.classList.add("is-ai-collapsed");
+        resourceWorkbench.classList.remove("is-ai-collapsing");
+      }, RESOURCE_AI_PANEL_TRANSITION_MS);
+      return;
+    }
+
+    if (!resourceWorkbench.classList.contains("is-ai-collapsed")) {
+      return;
+    }
+
+    resourceWorkbench.classList.add("is-ai-expanding", "is-ai-collapsing");
+    resourceWorkbench.classList.remove("is-ai-collapsed");
+    resourceAiPanelFrame = window.requestAnimationFrame(() => {
+      resourceAiPanelFrame = 0;
+      resourceWorkbench.classList.remove("is-ai-collapsing");
+      resourceAiPanelTimer = window.setTimeout(() => {
+        resourceWorkbench.classList.remove("is-ai-expanding");
+        // WebKitGTK (Tauri/Linux) can leave the panel's composited layer stale
+        // after the collapse transform, so the thread renders blank even though
+        // the messages are still in the DOM. Force a repaint to bring them back.
+        repaintResourceAiThread();
+      }, RESOURCE_AI_PANEL_TRANSITION_MS);
+    });
+  };
+
+  const repaintResourceAiThread = () => {
+    if (!resourceAiThread) {
+      return;
+    }
+    resourceAiThread.style.display = "none";
+    void resourceAiThread.offsetHeight; // force reflow → WebKitGTK re-rasterizes
+    resourceAiThread.style.display = "";
+  };
+
+  const isResourceAiCollapsedOrCollapsing = () =>
+    Boolean(
+      resourceWorkbench?.classList.contains("is-ai-collapsed") ||
+        (resourceWorkbench?.classList.contains("is-ai-collapsing") &&
+          !resourceWorkbench?.classList.contains("is-ai-expanding")),
+    );
+
+  const appendResourceAiMessage = (text: string, role: "user" | "assistant", images: ResourceAiPendingImage[] = []) => {
+    if (!resourceAiThread) {
+      return;
+    }
+
+    const message = document.createElement("div");
+    message.className = `ai-message ai-message--${role}`;
+    const bubble = document.createElement("div");
+    bubble.className = "ai-bubble";
+    if (text) {
+      const paragraph = document.createElement("p");
+      paragraph.textContent = text;
+      bubble.append(paragraph);
+    }
+    if (images.length) {
+      bubble.classList.add("ai-bubble--attachments");
+      const attachments = document.createElement("div");
+      attachments.className = "ai-attachments";
+      images.forEach((pending) => {
+        const image = document.createElement("img");
+        image.src = pending.url;
+        image.alt = pending.name;
+        image.loading = "lazy";
+        attachments.append(image);
+      });
+      bubble.append(attachments);
+    }
+    message.append(bubble);
+    resourceAiThread.append(message);
+    scrollResourceAiThread();
+    updateResourceAiContext();
+  };
+
+  const resourceImageFileDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", () => resolve(String(reader.result ?? "")));
+      reader.addEventListener("error", () => reject(reader.error ?? new Error("Could not read image.")));
+      reader.readAsDataURL(file);
+    });
+
+  const addResourceAiPendingImages = async (files: FileList | File[] | null) => {
+    const imageFiles = [...(files ?? [])].filter((file) => file.type.startsWith("image/"));
+
+    if (!imageFiles.length) {
+      return;
+    }
+
+    const previews = await Promise.all(
+      imageFiles.slice(0, Math.max(0, 5 - resourceAiPendingImages.length)).map(async (file) => ({
+        id: `resource-ai-image-${++resourceAiPendingImageSeq}`,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || "image/png",
+        url: await resourceImageFileDataUrl(file),
+      })),
+    );
+
+    resourceAiPendingImages = [...resourceAiPendingImages, ...previews].slice(0, 5);
+    renderResourceAiPendingImages();
+    syncResourceAiSend();
+    updateResourceAiContext();
+  };
+
+  const resourceImageFilesFromPaste = (data: DataTransfer | null) => {
+    if (!data) {
+      return [];
+    }
+
+    const itemFiles = [...data.items]
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+
+    if (itemFiles.length) {
+      return itemFiles;
+    }
+
+    return [...data.files].filter((file) => file.type.startsWith("image/"));
+  };
+
+  const appendResourceAiTyping = () => {
+    if (!resourceAiThread) {
+      return null;
+    }
+
+    const message = document.createElement("div");
+    message.className = "ai-message ai-message--assistant";
+    const bubble = document.createElement("div");
+    bubble.className = "ai-bubble";
+    const typing = document.createElement("div");
+    typing.className = "ai-typing";
+    typing.append(document.createElement("span"), document.createElement("span"), document.createElement("span"));
+    bubble.append(typing);
+    message.append(bubble);
+    resourceAiThread.append(message);
+    scrollResourceAiThread();
+    updateResourceAiContext();
+    return message;
+  };
+
+  // Live model output. The typing dots flip into a dim raw-text feed as soon
+  // as the first delta arrives, so a long generation visibly makes progress
+  // instead of looking stuck.
+  const attachLiveAiStream = (message: HTMLElement | null) => {
+    let feed: HTMLElement | null = null;
+
+    return {
+      push: (delta: string) => {
+        if (!message) {
+          return;
+        }
+        if (!feed) {
+          const bubble = message.querySelector(".ai-bubble");
+          if (!bubble) {
+            return;
+          }
+          bubble.textContent = "";
+          const live = document.createElement("div");
+          live.className = "ai-live";
+          const label = document.createElement("span");
+          label.className = "ai-live-label";
+          label.textContent = "Thinking…";
+          feed = document.createElement("pre");
+          feed.className = "ai-live-text";
+          live.append(label, feed);
+          bubble.append(live);
+        }
+        feed.textContent += delta;
+        feed.scrollTop = feed.scrollHeight;
+        scrollResourceAiThread();
+      },
+    };
+  };
+
+  const createResourceAiThinking = (thinking: string) => {
+    const details = document.createElement("details");
+    details.className = "ai-thinking";
+    const summary = document.createElement("summary");
+    summary.textContent = "Thinking";
+    const body = document.createElement("div");
+    body.className = "ai-thinking-body";
+    body.textContent = thinking;
+    details.append(summary, body);
+    return details;
+  };
+
+  const appendResourceAiStreamingMessage = (thinking = "") => {
+    if (!resourceAiThread) {
+      return null;
+    }
+
+    const message = document.createElement("div");
+    message.className = "ai-message ai-message--assistant";
+    const bubble = document.createElement("div");
+    bubble.className = "ai-bubble is-streaming";
+    if (thinking) {
+      bubble.append(createResourceAiThinking(thinking));
+    }
+    const paragraph = document.createElement("p");
+    paragraph.className = "ai-stream-text";
+    bubble.append(paragraph);
+    message.append(bubble);
+    resourceAiThread.append(message);
+    scrollResourceAiThread();
+    updateResourceAiContext();
+
+    return { bubble, paragraph };
+  };
+
+  const streamResourceAiText = (target: HTMLParagraphElement, text: string, token: number) =>
+    new Promise<void>((resolve) => {
+      const chunks = text.match(/\S+\s*/g) ?? [text];
+      let index = 0;
+
+      const tick = () => {
+        // Stop streaming immediately if the user hit Stop or started a new request.
+        if (token !== resourceAiRequestToken) {
+          resolve();
+          return;
+        }
+
+        target.textContent += chunks[index] ?? "";
+        index += 1;
+        scrollResourceAiThread();
+        updateResourceAiContext();
+
+        if (index >= chunks.length) {
+          resolve();
+          return;
+        }
+
+        window.setTimeout(tick, text.length > 420 ? 12 : 22);
+      };
+
+      tick();
+    });
+
+  // Turn a raw model response into a clean reply + the reasoning to fold away.
+  const parseTextureAiReply = (raw: string) =>
+    parseAiReply<TextureAiResult>(raw, ["reply", "edits", "message", "requests"]);
+
+  // Compact "(x,y)=#rrggbb" dump of a flat pixel array; transparent pixels are
+  // skipped and the list is capped so a big texture can't blow up the prompt.
+  const compactPixelString = (pixels: Array<string | null>, size: number) => {
+    const colored: string[] = [];
+    for (let index = 0; index < pixels.length && colored.length < 1200; index += 1) {
+      const color = pixels[index];
+      if (color) {
+        colored.push(`(${index % size},${Math.floor(index / size)})=${color}`);
+      }
+    }
+    return `${size}x${size}, ${colored.length} colored pixels\n${colored.join(" ")}`;
+  };
+
+  const isEditorOpenFor = (assetId: string | undefined) =>
+    (workspaceScreen?.classList.contains("editor-open") ?? false) && state.selectedAsset?.id === assetId;
+
+  // Exact pixels of an asset: live editor layers if it's the open one, otherwise
+  // decode its texture off-screen.
+  const assetPixelString = async (asset: WorkspaceAsset) => {
+    if (isEditorOpenFor(asset.id)) {
+      const size = state.editor.gridSize;
+      return compactPixelString(compositeLayers(state.editor.layers, size), size);
+    }
+
+    const image = await loadAssetImage(asset);
+    const size = image ? nativeGridSize(image) : 16;
+    const pixels = (image ? imagePixels(image, size) : null) ?? new Array<string | null>(size * size).fill(null);
+    return compactPixelString(pixels, size);
+  };
+
+  const openAssetPixelString = () => {
+    if (!state.selectedAsset || !isEditorOpenFor(state.selectedAsset.id)) {
+      return null;
+    }
+    const size = state.editor.gridSize;
+    return compactPixelString(compositeLayers(state.editor.layers, size), size);
+  };
+
+  const resolveAiEditAsset = (edit: TextureAiAssetEdit) => {
+    const rawId = String(edit.assetId ?? edit.asset_id ?? edit.texturePath ?? edit.texture_path ?? "").trim();
+
+    if (!rawId) {
+      return state.selectedAsset;
+    }
+
+    return (
+      state.assets.find(
+        (asset) =>
+          asset.id === rawId ||
+          asset.texturePath === rawId ||
+          asset.texturePath === `${rawId}.png` ||
+          asset.id.endsWith(`/${rawId.replace(/\.png$/i, "")}`),
+      ) ?? null
+    );
+  };
+
+  // Answer the model's data "requests" (block list / pixels) into a text blob
+  // that's fed back to it on the next round.
+  const fulfillResourceAiRequests = async (requests: TextureAiDataRequest[]) => {
+    const parts: string[] = [];
+
+    for (const request of requests.slice(0, 8)) {
+      const type = String(request.type ?? "").toLowerCase();
+
+      if (type === "search" || type === "find") {
+        const query = String(request.query ?? request.assetId ?? request.asset_id ?? "")
+          .toLowerCase()
+          .trim();
+        const matches = query
+          ? state.assets.filter(
+              (asset) =>
+                asset.id.toLowerCase().includes(query) || asset.name.toLowerCase().includes(query),
+            )
+          : [];
+        const list = matches
+          .slice(0, 80)
+          .map((asset) => `${asset.id} (${asset.name}) [${asset.kind}]`)
+          .join("\n");
+        parts.push(
+          matches.length
+            ? `Search "${query}" — ${matches.length} match(es):\n${list}`
+            : `Search "${query}": no textures matched.`,
+        );
+      } else if (type === "blocks" || type === "block" || type === "list" || type === "all") {
+        const list = state.assets
+          .slice(0, 800)
+          .map((asset) => `${asset.id} (${asset.name}) [${asset.kind}]`)
+          .join("\n");
+        const suffix = state.assets.length > 800 ? ` (showing first 800; use search for the rest)` : "";
+        parts.push(`Textures (${state.assets.length})${suffix}:\n${list}`);
+      } else if (type === "pixels" || type === "pixel" || type === "colors") {
+        const id = String(request.assetId ?? request.asset_id ?? "").trim();
+        const asset = id ? resolveAiEditAsset({ assetId: id }) : state.selectedAsset;
+
+        if (!asset) {
+          parts.push(`Pixels for "${id || "selected"}": no matching texture.`);
+          continue;
+        }
+
+        parts.push(`Pixels of ${asset.id} (${asset.name}):\n${await assetPixelString(asset)}`);
+      }
+    }
+
+    return parts.join("\n\n");
+  };
+
+  // Clamp/validate a raw edit's pixels against a grid size.
+  const validateAiPixels = (pixels: TextureAiPixelEdit[] | undefined, size: number, budget: number) => {
+    const valid: TextureAiPixelEdit[] = [];
+    for (const pixel of pixels ?? []) {
+      if (valid.length >= budget) {
+        break;
+      }
+      const x = Number(pixel.x);
+      const y = Number(pixel.y);
+      const color = normalizeHexColor(String(pixel.color ?? ""));
+      if (Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < size && y < size && color) {
+        valid.push({ x, y, color });
+      }
+    }
+    return valid;
+  };
+
+  // Apply AI pixels to the texture currently open in the editor (as an undoable
+  // "AI edit" layer, shown live).
+  const applyAiEditsToOpenAsset = (pixels: TextureAiPixelEdit[], budget: number) => {
+    const size = state.editor.gridSize;
+    const valid = validateAiPixels(pixels, size, budget);
+    if (!valid.length) {
+      return 0;
+    }
+
+    pushHistory();
+    const aiLayer = createLayer("AI edit", size);
+    state.editor.layers.unshift(aiLayer);
+    state.editor.activeLayerId = aiLayer.id;
+    valid.forEach((pixel) => {
+      aiLayer.pixels[pixel.y * size + pixel.x] = pixel.color;
+    });
+
+    if (state.selectedAsset) {
+      state.selectedAsset.edited = true;
+      assetTileCache.delete(state.selectedAsset.id);
+    }
+    state.editor.dirty = true;
+    renderLayers();
+    renderPixels();
+    renderStats();
+    renderAssetGrid();
+    return valid.length;
+  };
+
+  // Apply AI pixels to a texture that is NOT open: decode it, overlay the pixels,
+  // and save it back to disk without disturbing the editor.
+  const applyAiEditsToOtherAsset = async (asset: WorkspaceAsset, pixels: TextureAiPixelEdit[], budget: number) => {
+    const image = await loadAssetImage(asset);
+    const size = image ? nativeGridSize(image) : 16;
+    const base = (image ? imagePixels(image, size) : null) ?? new Array<string | null>(size * size).fill(null);
+    const valid = validateAiPixels(pixels, size, budget);
+    if (!valid.length) {
+      return 0;
+    }
+
+    valid.forEach((pixel) => {
+      base[pixel.y * size + pixel.x] = pixel.color;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return 0;
+    }
+    drawPixelsToContext(context, base, size);
+    const pngBase64 = canvas.toDataURL("image/png").split(",")[1] ?? "";
+
+    const output = await callBackend<SaveTextureResult>(
+      "save_texture",
+      { projectId: state.project.id || "preview", assetId: asset.id, pngBase64 },
+      () => "browser-preview",
+    );
+
+    asset.edited = true;
+    const savedPath = typeof output === "string" ? "" : output.path ?? "";
+    asset.previewPath = savedPath || asset.previewPath;
+    asset.previewUrl = savedPath ? pathToPreviewUrl(savedPath) : `data:image/png;base64,${pngBase64}`;
+    assetTileCache.delete(asset.id);
+    renderAssetGrid();
+    return valid.length;
+  };
+
+  const applyTextureAiEdits = async (result: TextureAiResult | null) => {
+    const edits = result?.edits?.filter((edit) => Array.isArray(edit.pixels) && edit.pixels.length > 0) ?? [];
+
+    if (!edits.length) {
+      return { changed: 0, assets: [] as WorkspaceAsset[] };
+    }
+
+    // Group pixels by the asset they target so we can edit several blocks at once.
+    const groups = new Map<string, { asset: WorkspaceAsset; pixels: TextureAiPixelEdit[] }>();
+    for (const edit of edits) {
+      const asset = resolveAiEditAsset(edit);
+      if (!asset) {
+        continue;
+      }
+      const group = groups.get(asset.id) ?? { asset, pixels: [] };
+      group.pixels.push(...(edit.pixels ?? []));
+      groups.set(asset.id, group);
+    }
+
+    if (!groups.size) {
+      return { changed: 0, assets: [] as WorkspaceAsset[] };
+    }
+
+    let changed = 0;
+    const changedAssets: WorkspaceAsset[] = [];
+    let budget = TEXTURE_AI_PIXEL_LIMIT;
+
+    for (const { asset, pixels } of groups.values()) {
+      if (budget <= 0) {
+        break;
+      }
+      const applied = isEditorOpenFor(asset.id)
+        ? applyAiEditsToOpenAsset(pixels, budget)
+        : await applyAiEditsToOtherAsset(asset, pixels, budget);
+
+      if (applied > 0) {
+        changed += applied;
+        budget -= applied;
+        changedAssets.push(asset);
+      }
+    }
+
+    return { changed, assets: changedAssets };
+  };
+
+  const runTextureAi = async (
+    config: ResourceAiConfig,
+    prompt: string,
+    images: ResourceAiPendingImage[],
+    toolResults = "",
+    streamId: string | null = null,
+  ) => {
+    // Don't dump the whole list — the model must filter/search for textures.
+    // Send only per-kind counts and a few example ids so it learns the id format.
+    const kindCounts = new Map<string, number>();
+    for (const asset of state.assets) {
+      kindCounts.set(asset.kind, (kindCounts.get(asset.kind) ?? 0) + 1);
+    }
+    const assetSummary = [...kindCounts.entries()].map(([kind, count]) => `${kind} ×${count}`).join(", ");
+    const assets = [...kindCounts.keys()].flatMap((kind) =>
+      state.assets
+        .filter((asset) => asset.kind === kind)
+        .slice(0, 3)
+        .map((asset) => ({
+          id: asset.id,
+          name: asset.name,
+          texturePath: asset.texturePath,
+          edited: Boolean(asset.edited),
+        })),
+    );
+
+    // Only report a texture as "open in the editor" when it actually is.
+    const openAsset =
+      (workspaceScreen?.classList.contains("editor-open") ?? false) ? state.selectedAsset : null;
+
+    const response = await invoke<TextureAiBackendResponse>("run_texture_ai", {
+      config,
+      request: {
+        prompt,
+        projectName: state.project.name,
+        gridSize: state.editor.gridSize,
+        selectedAssetId: openAsset?.id ?? null,
+        selectedAssetName: openAsset?.name ?? null,
+        assets,
+        totalAssets: state.assets.length,
+        assetSummary,
+        images: images.map((image) => ({
+          name: image.name,
+          mimeType: image.mimeType,
+          dataUrl: image.url,
+        })) as TextureAiImage[],
+        openAssetPixels: openAssetPixelString(),
+        toolResults: toolResults || null,
+        streamId,
+      },
+    });
+
+    return response;
+  };
+
+  const submitResourceAiPrompt = async (prompt: string) => {
+    const text = prompt.trim();
+    if (!text && !resourceAiPendingImages.length) {
+      return;
+    }
+
+    if (resourceAiRequestActive) {
+      return;
+    }
+
+    const config = configuredResourceAi();
+
+    if (!config) {
+      return;
+    }
+
+    resourceAiRequestActive = true;
+    const token = ++resourceAiRequestToken;
+    syncResourceAiSend();
+    updateResourceAiSendMode();
+
+    const sentImages = resourceAiPendingImages;
+    resourceAiAttachedImageBytes += sentImages.reduce((total, image) => total + image.size, 0);
+    resourceAiPendingImages = [];
+    renderResourceAiPendingImages();
+    appendResourceAiMessage(text, "user", sentImages);
+    if (resourceAiInput) {
+      resourceAiInput.value = "";
+      resizeResourceAiInput();
+    }
+    syncResourceAiSend();
+
+    const typing = appendResourceAiTyping();
+    const live = attachLiveAiStream(typing);
+    setStatus("Texture AI is thinking...");
+
+    try {
+      // Request/fulfill loop: the model may ask for the block list or a block's
+      // pixels before it can answer. We answer and re-ask, bounded so it ends.
+      const MAX_AI_ROUNDS = 3;
+      let toolResults = "";
+      let usedTokens = 0;
+      let parsed = parseTextureAiReply("{}");
+
+      for (let round = 0; round < MAX_AI_ROUNDS; round += 1) {
+        const streamId = newAiStreamId();
+        const stopStream = onAiStream(streamId, (delta) => {
+          if (token === resourceAiRequestToken) {
+            live.push(delta);
+          }
+        });
+
+        let response: TextureAiBackendResponse;
+        try {
+          response = await runTextureAi(config, text, sentImages, toolResults, streamId);
+        } finally {
+          stopStream();
+        }
+        if (token !== resourceAiRequestToken) {
+          return; // stopped while waiting
+        }
+
+        // Exact usage when the provider reports it, a ~4 chars/token estimate
+        // of the round's traffic when it doesn't — never silently zero.
+        usedTokens +=
+          typeof response.totalTokens === "number"
+            ? response.totalTokens
+            : Math.ceil((text.length + toolResults.length + response.text.length) / 4);
+
+        parsed = parseTextureAiReply(response.text);
+        const requests = Array.isArray(parsed.result?.requests) ? parsed.result.requests : [];
+        const hasEdits = (parsed.result?.edits?.length ?? 0) > 0;
+
+        if (requests.length && !hasEdits && round < MAX_AI_ROUNDS - 1) {
+          setStatus("Texture AI is gathering data…");
+          live.push("\n\n— fetching the data it asked for, asking again —\n\n");
+          const fulfilled = await fulfillResourceAiRequests(requests);
+          if (token !== resourceAiRequestToken) {
+            return;
+          }
+          toolResults = toolResults ? `${toolResults}\n\n${fulfilled}` : fulfilled;
+          continue;
+        }
+
+        break;
+      }
+
+      if (usedTokens > 0) {
+        // Conversation-cumulative: every round of every message counts.
+        resourceAiLastTotalTokens = (resourceAiLastTotalTokens ?? 0) + usedTokens;
+        updateResourceAiContext();
+      }
+
+      const { result, reply, thinking } = parsed;
+      const applied = await applyTextureAiEdits(result);
+      if (token !== resourceAiRequestToken) {
+        return;
+      }
+
+      typing?.remove();
+      const streamTarget = appendResourceAiStreamingMessage(thinking);
+
+      if (streamTarget) {
+        await streamResourceAiText(streamTarget.paragraph, reply, token);
+        if (token === resourceAiRequestToken) {
+          streamTarget.bubble.classList.remove("is-streaming");
+        }
+      } else {
+        appendResourceAiMessage(reply, "assistant");
+      }
+
+      if (applied.changed > 0) {
+        const names = applied.assets.map((asset) => asset.name).join(", ");
+        const openEdited = applied.assets.some((asset) => isEditorOpenFor(asset.id));
+        setStatus(
+          `AI edited ${applied.changed} pixels on ${names}.${openEdited ? " Save texture to keep it." : ""}`,
+        );
+      } else if (result?.edits?.length) {
+        setStatus("AI replied, but no valid texture pixels were found.");
+      } else {
+        setStatus("AI replied.");
+      }
+    } catch (error) {
+      if (token !== resourceAiRequestToken) {
+        return; // stopped; ignore the failure of the abandoned request
+      }
+      typing?.remove();
+      const message = error instanceof Error ? error.message : String(error);
+      appendResourceAiMessage(message, "assistant");
+      setStatus("AI request failed.");
+    } finally {
+      if (token === resourceAiRequestToken) {
+        resourceAiRequestActive = false;
+        updateResourceAiSendMode();
+        syncResourceAiSend();
+        updateResourceAiContext();
+      }
     }
   };
 
@@ -648,6 +1883,8 @@ export function initWorkspace() {
     if (editedCount) {
       editedCount.textContent = String(state.assets.filter((asset) => asset.edited).length);
     }
+
+    updateResourceAiContext();
   };
 
   const loadTextureDataUrl = async (asset: WorkspaceAsset) => {
@@ -671,72 +1908,219 @@ export function initWorkspace() {
     return pngBase64 ? `data:image/png;base64,${pngBase64}` : "";
   };
 
+  const buildAssetTile = (asset: WorkspaceAsset) => {
+    const tile = document.createElement("button");
+    tile.className = asset.edited ? "asset-tile asset-tile--edited" : "asset-tile";
+    tile.type = "button";
+    tile.dataset.assetId = asset.id;
+
+    const preview = document.createElement("span");
+    preview.className = asset.previewUrl ? "asset-preview" : "asset-preview asset-preview--missing";
+
+    if (asset.previewUrl) {
+      const image = document.createElement("img");
+      image.src = asset.previewUrl;
+      image.alt = "";
+      image.loading = "lazy";
+      image.decoding = "async";
+      image.setAttribute("fetchpriority", "low");
+      image.addEventListener("error", () => {
+        if (image.dataset.fallback === "1") {
+          image.remove();
+          preview.classList.add("asset-preview--missing");
+          return;
+        }
+
+        image.dataset.fallback = "1";
+        void loadTextureDataUrl(asset).then((fallbackUrl) => {
+          if (fallbackUrl) {
+            image.src = fallbackUrl;
+          } else {
+            image.remove();
+            preview.classList.add("asset-preview--missing");
+          }
+        });
+      });
+      preview.append(image);
+    }
+
+    const name = document.createElement("span");
+    name.className = "asset-name";
+    name.textContent = asset.name;
+
+    const path = document.createElement("small");
+    path.textContent = asset.texturePath;
+
+    tile.append(preview, name, path);
+    tile.addEventListener("click", () => selectAsset(asset));
+    tile.addEventListener("dblclick", () => {
+      void openEditor(asset);
+    });
+
+    return tile;
+  };
+
+  const getAssetTile = (asset: WorkspaceAsset) => {
+    const previewUrl = asset.previewUrl ?? "";
+    const edited = Boolean(asset.edited);
+    const cached = assetTileCache.get(asset.id);
+
+    if (cached && cached.previewUrl === previewUrl && cached.edited === edited) {
+      return cached.el;
+    }
+
+    const el = buildAssetTile(asset);
+    assetTileCache.set(asset.id, { el, previewUrl, edited });
+    return el;
+  };
+
+  const updateAssetGridMetrics = () => {
+    if (!assetGrid) {
+      assetGridColumnCount = 1;
+      assetGridVisibleRowCount = ASSET_GRID_BUFFER_ROWS * 2 + 1;
+      return;
+    }
+
+    const usableWidth = Math.max(ASSET_TILE_WIDTH, assetGrid.clientWidth - ASSET_GRID_HORIZONTAL_PADDING);
+    const columnStride = ASSET_TILE_WIDTH + ASSET_GRID_GAP;
+    const rowStride = ASSET_TILE_HEIGHT + ASSET_GRID_GAP;
+    assetGridColumnCount = Math.max(1, Math.floor((usableWidth + ASSET_GRID_GAP) / columnStride));
+    assetGridVisibleRowCount = Math.ceil(assetGrid.clientHeight / rowStride) + ASSET_GRID_BUFFER_ROWS * 2;
+  };
+
+  const ensureAssetGridShell = () => {
+    if (!assetGrid) {
+      return null;
+    }
+
+    if (!assetGridTopSpacer) {
+      assetGridTopSpacer = document.createElement("div");
+      assetGridTopSpacer.className = "asset-grid-spacer";
+    }
+
+    if (!assetGridWindow) {
+      assetGridWindow = document.createElement("div");
+      assetGridWindow.className = "asset-grid-window";
+    }
+
+    if (!assetGridBottomSpacer) {
+      assetGridBottomSpacer = document.createElement("div");
+      assetGridBottomSpacer.className = "asset-grid-spacer";
+    }
+
+    if (
+      assetGrid.children[0] !== assetGridTopSpacer ||
+      assetGrid.children[1] !== assetGridWindow ||
+      assetGrid.children[2] !== assetGridBottomSpacer ||
+      assetGrid.children.length !== 3
+    ) {
+      assetGrid.replaceChildren(assetGridTopSpacer, assetGridWindow, assetGridBottomSpacer);
+    }
+
+    return {
+      topSpacer: assetGridTopSpacer,
+      windowGrid: assetGridWindow,
+      bottomSpacer: assetGridBottomSpacer,
+    };
+  };
+
+  const showEmptyAssetGrid = () => {
+    if (!assetGrid) {
+      return;
+    }
+
+    if (!assetGridEmpty) {
+      assetGridEmpty = document.createElement("p");
+      assetGridEmpty.className = "asset-empty";
+      assetGridEmpty.textContent = "No assets match that search.";
+    }
+
+    renderedAssetWindow = "";
+    assetGrid.replaceChildren(assetGridEmpty);
+  };
+
+  const renderAssetWindow = () => {
+    if (!assetGrid) {
+      return;
+    }
+
+    const assets = renderedAssets;
+
+    if (!assets.length) {
+      showEmptyAssetGrid();
+      return;
+    }
+
+    const shell = ensureAssetGridShell();
+
+    if (!shell) {
+      return;
+    }
+
+    const columns = assetGridColumnCount;
+    const rowStride = ASSET_TILE_HEIGHT + ASSET_GRID_GAP;
+    const totalRows = Math.ceil(assets.length / columns);
+    const firstRow = Math.max(0, Math.floor(assetGrid.scrollTop / rowStride) - ASSET_GRID_BUFFER_ROWS);
+    const visibleRows = assetGridVisibleRowCount;
+    const lastRow = Math.min(totalRows, firstRow + visibleRows);
+    const startIndex = firstRow * columns;
+    const endIndex = Math.min(assets.length, lastRow * columns);
+    const signature = `${columns}:${startIndex}:${endIndex}:${assets.length}`;
+
+    if (signature === renderedAssetWindow) {
+      return;
+    }
+
+    renderedAssetWindow = signature;
+
+    shell.topSpacer.style.height = `${firstRow * rowStride}px`;
+    shell.windowGrid.style.setProperty("--asset-grid-columns", String(columns));
+
+    const fragment = document.createDocumentFragment();
+    assets.slice(startIndex, endIndex).forEach((asset) => {
+      fragment.append(getAssetTile(asset));
+    });
+    shell.windowGrid.replaceChildren(fragment);
+
+    const renderedRows = Math.ceil((endIndex - startIndex) / columns);
+    const bottomRows = Math.max(0, totalRows - firstRow - renderedRows);
+    shell.bottomSpacer.style.height = `${bottomRows * rowStride}px`;
+  };
+
+  const scheduleAssetWindowRender = () => {
+    if (assetScrollFrame) {
+      return;
+    }
+
+    assetScrollFrame = window.requestAnimationFrame(() => {
+      assetScrollFrame = 0;
+      renderAssetWindow();
+    });
+  };
+
   const renderAssetGrid = () => {
     if (!assetGrid) {
       return;
     }
 
-    const assets = filteredAssets();
-    assetGrid.classList.remove("asset-grid--fade");
-    void assetGrid.offsetWidth;
-    assetGrid.classList.add("asset-grid--fade");
-    assetGrid.textContent = "";
+    renderedAssets = filteredAssets();
+    updateAssetGridMetrics();
 
-    if (!assets.length) {
-      const empty = document.createElement("p");
-      empty.className = "asset-empty";
-      empty.textContent = "No assets match that search.";
-      assetGrid.append(empty);
-      return;
+    // Drop cached tiles only when the underlying asset set actually changes
+    // (search, filter, project reload) — not on edits/scroll, which keep the
+    // same ids/order and reuse decoded images. The cap is a safety valve so the
+    // cache can't grow without bound across many filter switches.
+    const signature = `${renderedAssets.length}:${renderedAssets[0]?.id ?? ""}:${
+      renderedAssets[renderedAssets.length - 1]?.id ?? ""
+    }`;
+    if (signature !== renderedAssetSignature || assetTileCache.size > 1500) {
+      assetTileCache.clear();
+      renderedAssetSignature = signature;
     }
 
-    assets.forEach((asset) => {
-      const tile = document.createElement("button");
-      tile.className = asset.edited ? "asset-tile asset-tile--edited" : "asset-tile";
-      tile.type = "button";
-      tile.dataset.assetId = asset.id;
-      const preview = document.createElement("span");
-      preview.className = asset.previewUrl ? "asset-preview" : "asset-preview asset-preview--missing";
-
-      if (asset.previewUrl) {
-        const image = document.createElement("img");
-        image.src = asset.previewUrl;
-        image.alt = "";
-        image.loading = "lazy";
-        image.addEventListener("error", () => {
-          if (image.dataset.fallback === "1") {
-            image.remove();
-            preview.classList.add("asset-preview--missing");
-            return;
-          }
-
-          image.dataset.fallback = "1";
-          void loadTextureDataUrl(asset).then((fallbackUrl) => {
-            if (fallbackUrl) {
-              image.src = fallbackUrl;
-            } else {
-              image.remove();
-              preview.classList.add("asset-preview--missing");
-            }
-          });
-        });
-        preview.append(image);
-      }
-
-      const name = document.createElement("span");
-      name.className = "asset-name";
-      name.textContent = asset.name;
-
-      const path = document.createElement("small");
-      path.textContent = asset.texturePath;
-
-      tile.append(preview, name, path);
-      tile.addEventListener("click", () => selectAsset(asset));
-      tile.addEventListener("dblclick", () => {
-        void openEditor(asset);
-      });
-      assetGrid.append(tile);
-    });
+    renderedAssetWindow = "";
+    assetGrid.scrollTop = 0;
+    renderAssetWindow();
   };
 
   const renderWorkspace = () => {
@@ -745,7 +2129,7 @@ export function initWorkspace() {
     }
 
     if (projectIcon) {
-      projectIcon.textContent = state.project.iconDataUrl ? "" : "TP";
+      projectIcon.textContent = state.project.iconDataUrl ? "" : "RP";
       projectIcon.style.backgroundImage = state.project.iconDataUrl
         ? `url("${state.project.iconDataUrl}")`
         : "";
@@ -778,6 +2162,7 @@ export function initWorkspace() {
 
   const selectAsset = (asset: WorkspaceAsset) => {
     state.selectedAsset = asset;
+    updateResourceAiContext();
     setStatus("Double-click to edit.");
   };
 
@@ -792,15 +2177,27 @@ export function initWorkspace() {
     pixels: Array<string | null>,
     size: number,
   ) => {
-    context.clearRect(0, 0, size, size);
-    pixels.forEach((color, index) => {
+    // One putImageData beats thousands of fillStyle/fillRect calls — the latter
+    // re-parses the colour string for every pixel and was the source of the lag.
+    const image = context.createImageData(size, size);
+    const data = image.data;
+
+    for (let i = 0; i < pixels.length; i += 1) {
+      const color = pixels[i];
+
       if (!color) {
-        return;
+        continue; // createImageData is zero-filled, so this stays transparent.
       }
 
-      context.fillStyle = color;
-      context.fillRect(index % size, Math.floor(index / size), 1, 1);
-    });
+      const rgb = parseHexColor(color);
+      const offset = i * 4;
+      data[offset] = rgb[0];
+      data[offset + 1] = rgb[1];
+      data[offset + 2] = rgb[2];
+      data[offset + 3] = 255;
+    }
+
+    context.putImageData(image, 0, 0);
   };
 
   const refreshLayerThumbs = () => {
@@ -840,8 +2237,14 @@ export function initWorkspace() {
       return;
     }
 
-    const canvasRect = pixelCanvas.getBoundingClientRect();
-    const cell = canvasRect.width / state.editor.gridSize;
+    const canvasMetrics = getCanvasMetrics();
+
+    if (!canvasMetrics) {
+      return;
+    }
+
+    const { rect, offsetLeft, offsetTop } = canvasMetrics;
+    const cell = rect.width / state.editor.gridSize;
     let { x, y, w, h } = moveState.rect;
 
     if (moveState.phase !== "selecting") {
@@ -849,8 +2252,7 @@ export function initWorkspace() {
       y += moveState.offset.y;
     }
 
-    selectionOverlay.style.left = `${pixelCanvas.offsetLeft + x * cell}px`;
-    selectionOverlay.style.top = `${pixelCanvas.offsetTop + y * cell}px`;
+    selectionOverlay.style.transform = `translate3d(${offsetLeft + x * cell}px, ${offsetTop + y * cell}px, 0)`;
     selectionOverlay.style.width = `${w * cell}px`;
     selectionOverlay.style.height = `${h * cell}px`;
     selectionOverlay.style.opacity = "1";
@@ -927,9 +2329,15 @@ export function initWorkspace() {
     }
 
     dragLayerId = null;
-    document
-      .querySelectorAll<HTMLElement>(".layer-row.is-dragging")
-      .forEach((row) => row.classList.remove("is-dragging"));
+    syncLayerRows();
+  };
+
+  const syncLayerRows = () => {
+    layerList?.querySelectorAll<HTMLElement>("[data-layer-id]").forEach((row) => {
+      const layerId = row.dataset.layerId;
+      row.classList.toggle("is-active", layerId === state.editor.activeLayerId);
+      row.classList.toggle("is-dragging", layerId === dragLayerId);
+    });
   };
 
   const renderLayers = () => {
@@ -1018,7 +2426,7 @@ export function initWorkspace() {
         dragOrderBefore = state.editor.layers.map((entry) => entry.id);
         document.addEventListener("pointermove", onLayerDragMove);
         document.addEventListener("pointerup", onLayerDragEnd, { once: true });
-        renderLayers();
+        syncLayerRows();
       });
 
       row.append(thumb, name, visibility, remove);
@@ -1028,7 +2436,10 @@ export function initWorkspace() {
     refreshLayerThumbs();
   };
 
-  const renderPixels = () => {
+  // Repainting the main canvas is cheap; refreshing every layer thumbnail is
+  // not. During a continuous stroke we skip the thumbnails (updateThumbs=false)
+  // and only refresh them once the stroke settles.
+  const renderPixels = (updateThumbs = true) => {
     if (!pixelCanvas) {
       return;
     }
@@ -1040,8 +2451,12 @@ export function initWorkspace() {
     }
 
     const size = state.editor.gridSize;
-    pixelCanvas.width = size;
-    pixelCanvas.height = size;
+    if (pixelCanvas.width !== size || pixelCanvas.height !== size) {
+      pixelCanvas.width = size;
+      pixelCanvas.height = size;
+      invalidateCanvasRect();
+      positionGridOverlay();
+    }
     drawPixelsToContext(context, compositeLayers(state.editor.layers, size), size);
 
     if (moveState && moveState.floatingPixels.length > 0) {
@@ -1056,7 +2471,33 @@ export function initWorkspace() {
       });
     }
 
-    refreshLayerThumbs();
+    if (updateThumbs) {
+      refreshLayerThumbs();
+    }
+  };
+
+  // Coalesce the rapid repaints of an active stroke into one per frame, and
+  // leave the thumbnails alone until the stroke finishes.
+  let drawFrame = 0;
+
+  const scheduleDraw = () => {
+    if (drawFrame) {
+      return;
+    }
+
+    drawFrame = window.requestAnimationFrame(() => {
+      drawFrame = 0;
+      renderPixels(false);
+    });
+  };
+
+  const finalizeStroke = () => {
+    if (drawFrame) {
+      window.cancelAnimationFrame(drawFrame);
+      drawFrame = 0;
+    }
+
+    renderPixels(true);
   };
 
   const addLayer = () => {
@@ -1178,7 +2619,9 @@ export function initWorkspace() {
   });
 
   const pushHistory = () => {
-    state.editor.history = [...state.editor.history.slice(-24), snapshotEditor()];
+    state.editor.history = [...state.editor.history.slice(-49), snapshotEditor()];
+    // A fresh edit invalidates anything that was undone.
+    state.editor.redo = [];
   };
 
   const restoreSnapshot = (snapshot: EditorSnapshot) => {
@@ -1191,12 +2634,83 @@ export function initWorkspace() {
     renderPixels();
   };
 
+  const undoEdit = () => {
+    const previous = state.editor.history.pop();
+
+    if (!previous) {
+      setStatus("Nothing to undo.");
+      return;
+    }
+
+    // Stash the current state so it can be redone.
+    state.editor.redo = [...state.editor.redo.slice(-49), snapshotEditor()];
+    cancelActiveStroke();
+    restoreSnapshot(previous);
+    state.editor.dirty = true;
+    setStatus("Undid last change.");
+  };
+
+  const redoEdit = () => {
+    const next = state.editor.redo.pop();
+
+    if (!next) {
+      setStatus("Nothing to redo.");
+      return;
+    }
+
+    state.editor.history = [...state.editor.history.slice(-49), snapshotEditor()];
+    cancelActiveStroke();
+    restoreSnapshot(next);
+    state.editor.dirty = true;
+    setStatus("Redid change.");
+  };
+
+  const clearActiveLayer = () => {
+    const layer = activeLayer();
+
+    if (!layer) {
+      return;
+    }
+
+    pushHistory();
+    layer.pixels = createPixels(state.editor.gridSize);
+    state.editor.dirty = true;
+    renderPixels();
+    setStatus("Cleared layer.");
+  };
+
+  // The canvas rect only changes on resize/scroll/zoom — caching it stops every
+  // pointer-move from forcing a synchronous layout right after we mutate the
+  // cursor styles (read-after-write layout thrash).
+  let canvasMetricsCache: { rect: DOMRect; offsetLeft: number; offsetTop: number } | null = null;
+  const getCanvasMetrics = () => {
+    if (!canvasMetricsCache && pixelCanvas) {
+      canvasMetricsCache = {
+        rect: pixelCanvas.getBoundingClientRect(),
+        offsetLeft: pixelCanvas.offsetLeft,
+        offsetTop: pixelCanvas.offsetTop,
+      };
+    }
+    return canvasMetricsCache;
+  };
+  const getCanvasRect = () => {
+    return getCanvasMetrics()?.rect ?? null;
+  };
+  const invalidateCanvasRect = () => {
+    canvasMetricsCache = null;
+  };
+
   const pixelFromEvent = (event: PointerEvent) => {
     if (!pixelCanvas) {
       return null;
     }
 
-    const rect = pixelCanvas.getBoundingClientRect();
+    const rect = getCanvasRect();
+
+    if (!rect) {
+      return null;
+    }
+
     const x = Math.floor(((event.clientX - rect.left) / rect.width) * state.editor.gridSize);
     const y = Math.floor(((event.clientY - rect.top) / rect.height) * state.editor.gridSize);
 
@@ -1266,7 +2780,7 @@ export function initWorkspace() {
 
     if (changed) {
       state.editor.dirty = true;
-      renderPixels();
+      scheduleDraw();
     }
   };
 
@@ -1275,6 +2789,7 @@ export function initWorkspace() {
     state.editor.layers = [layer];
     state.editor.activeLayerId = layer.id;
     state.editor.history = [];
+    state.editor.redo = [];
   };
 
   const setGridSize = (size: number) => {
@@ -1314,6 +2829,11 @@ export function initWorkspace() {
 
     renderLayers();
     renderPixels();
+    // Reset view state for the freshly opened texture.
+    state.editor.zoom = 1;
+    applyZoom();
+    setShowGrid(state.editor.showGrid);
+    renderRecentColors();
   };
 
   const closeEditor = () => {
@@ -1368,8 +2888,8 @@ export function initWorkspace() {
     const packVersion = exportVersion?.value.trim() || state.project.packVersion || "1.0";
     const author = state.project.author?.trim() || "Me!";
     const description =
-      ellipsize(stripHtml(state.project.description) || "A clean texture pack for survival worlds.") ||
-      "A clean texture pack for survival worlds.";
+      ellipsize(stripHtml(state.project.description) || "A clean resource pack for survival worlds.") ||
+      "A clean resource pack for survival worlds.";
 
     if (exportPackName) {
       exportPackName.textContent = state.project.name;
@@ -1392,7 +2912,7 @@ export function initWorkspace() {
         image.alt = "";
         exportPackIcon.append(image);
       } else {
-        exportPackIcon.textContent = "TP";
+        exportPackIcon.textContent = "RP";
       }
     }
   };
@@ -1461,6 +2981,381 @@ export function initWorkspace() {
     }
   };
 
+  // ---- Shape / fill / stroke helpers ---------------------------------------
+
+  // While a shape (line/rect/ellipse) is being dragged we keep the layer's
+  // pixels from the moment the stroke began so each preview frame can redraw
+  // cleanly from a clean slate instead of stacking on the previous preview.
+  let shapeOrigin: { x: number; y: number } | null = null;
+  let shapeBackup: Array<string | null> | null = null;
+
+  const paintPixel = (
+    layer: Layer,
+    centerX: number,
+    centerY: number,
+    erase: boolean,
+  ) => {
+    const size = state.editor.gridSize;
+    const startX = brushOrigin(centerX);
+    const startY = brushOrigin(centerY);
+
+    for (let dy = 0; dy < state.editor.brushSize; dy += 1) {
+      for (let dx = 0; dx < state.editor.brushSize; dx += 1) {
+        const px = startX + dx;
+        const py = startY + dy;
+
+        if (px < 0 || py < 0 || px >= size || py >= size) {
+          continue;
+        }
+
+        layer.pixels[py * size + px] = erase ? null : state.editor.color;
+      }
+    }
+  };
+
+  const floodFill = (originX: number, originY: number) => {
+    const layer = activeLayer();
+
+    if (!layer) {
+      return;
+    }
+
+    const size = state.editor.gridSize;
+    const target = layer.pixels[originY * size + originX] ?? null;
+    const replacement = state.editor.color;
+
+    if (target === replacement) {
+      return;
+    }
+
+    const stack: Array<[number, number]> = [[originX, originY]];
+
+    while (stack.length) {
+      const [x, y] = stack.pop()!;
+
+      if (x < 0 || y < 0 || x >= size || y >= size) {
+        continue;
+      }
+
+      const index = y * size + x;
+
+      if ((layer.pixels[index] ?? null) !== target) {
+        continue;
+      }
+
+      layer.pixels[index] = replacement;
+      stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+    }
+
+    state.editor.dirty = true;
+    renderPixels();
+  };
+
+  type Plot = (x: number, y: number) => void;
+
+  const plotLine = (x0: number, y0: number, x1: number, y1: number, plot: Plot) => {
+    let dx = Math.abs(x1 - x0);
+    let dy = -Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    let cx = x0;
+    let cy = y0;
+
+    for (;;) {
+      plot(cx, cy);
+
+      if (cx === x1 && cy === y1) {
+        break;
+      }
+
+      const e2 = 2 * err;
+
+      if (e2 >= dy) {
+        err += dy;
+        cx += sx;
+      }
+
+      if (e2 <= dx) {
+        err += dx;
+        cy += sy;
+      }
+    }
+  };
+
+  // Snap a line endpoint to the nearest horizontal, vertical, or 45° direction.
+  const constrainLine = (
+    origin: { x: number; y: number },
+    target: { x: number; y: number },
+  ) => {
+    const dx = target.x - origin.x;
+    const dy = target.y - origin.y;
+    const adx = Math.abs(dx);
+    const ady = Math.abs(dy);
+
+    if (adx > ady * 2) {
+      return { x: target.x, y: origin.y };
+    }
+
+    if (ady > adx * 2) {
+      return { x: origin.x, y: target.y };
+    }
+
+    const d = Math.max(adx, ady);
+    return { x: origin.x + Math.sign(dx) * d, y: origin.y + Math.sign(dy) * d };
+  };
+
+  const plotRect = (
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    filled: boolean,
+    plot: Plot,
+  ) => {
+    const x0 = Math.min(a.x, b.x);
+    const x1 = Math.max(a.x, b.x);
+    const y0 = Math.min(a.y, b.y);
+    const y1 = Math.max(a.y, b.y);
+
+    if (filled) {
+      for (let y = y0; y <= y1; y += 1) {
+        for (let x = x0; x <= x1; x += 1) {
+          plot(x, y);
+        }
+      }
+      return;
+    }
+
+    for (let x = x0; x <= x1; x += 1) {
+      plot(x, y0);
+      plot(x, y1);
+    }
+
+    for (let y = y0; y <= y1; y += 1) {
+      plot(x0, y);
+      plot(x1, y);
+    }
+  };
+
+  const plotEllipse = (
+    a: { x: number; y: number },
+    b: { x: number; y: number },
+    filled: boolean,
+    plot: Plot,
+  ) => {
+    const x0 = Math.min(a.x, b.x);
+    const x1 = Math.max(a.x, b.x);
+    const y0 = Math.min(a.y, b.y);
+    const y1 = Math.max(a.y, b.y);
+    const cx = (x0 + x1) / 2;
+    const cy = (y0 + y1) / 2;
+    const rx = (x1 - x0) / 2;
+    const ry = (y1 - y0) / 2;
+
+    const inside = (x: number, y: number) => {
+      const nx = rx === 0 ? 0 : (x - cx) / rx;
+      const ny = ry === 0 ? 0 : (y - cy) / ry;
+      return nx * nx + ny * ny <= 1;
+    };
+
+    for (let y = y0; y <= y1; y += 1) {
+      for (let x = x0; x <= x1; x += 1) {
+        if (!inside(x, y)) {
+          continue;
+        }
+
+        if (
+          filled ||
+          !inside(x - 1, y) ||
+          !inside(x + 1, y) ||
+          !inside(x, y - 1) ||
+          !inside(x, y + 1)
+        ) {
+          plot(x, y);
+        }
+      }
+    }
+  };
+
+  const drawShapePreview = (
+    target: { x: number; y: number },
+    filledOrConstrain: boolean,
+  ) => {
+    const layer = activeLayer();
+
+    if (!layer || !shapeOrigin || !shapeBackup) {
+      return;
+    }
+
+    layer.pixels = shapeBackup.slice();
+    const plot: Plot = (x, y) => paintPixel(layer, x, y, false);
+
+    if (state.editor.tool === "line") {
+      const end = filledOrConstrain ? constrainLine(shapeOrigin, target) : target;
+      plotLine(shapeOrigin.x, shapeOrigin.y, end.x, end.y, plot);
+    } else if (state.editor.tool === "rect") {
+      plotRect(shapeOrigin, target, filledOrConstrain, plot);
+    } else if (state.editor.tool === "ellipse") {
+      plotEllipse(shapeOrigin, target, filledOrConstrain, plot);
+    }
+
+    state.editor.dirty = true;
+    scheduleDraw();
+  };
+
+  const beginShapeStroke = (pixel: { x: number; y: number }) => {
+    const layer = activeLayer();
+
+    if (!layer) {
+      return;
+    }
+
+    pushHistory();
+    shapeOrigin = { x: pixel.x, y: pixel.y };
+    shapeBackup = layer.pixels.slice();
+    state.editor.drawing = true;
+  };
+
+  const finishShapeStroke = () => {
+    shapeOrigin = null;
+    shapeBackup = null;
+    state.editor.drawing = false;
+  };
+
+  const cancelActiveStroke = () => {
+    if (shapeOrigin && shapeBackup) {
+      const layer = activeLayer();
+
+      if (layer) {
+        layer.pixels = shapeBackup.slice();
+      }
+
+      shapeOrigin = null;
+      shapeBackup = null;
+      renderPixels();
+    }
+
+    state.editor.drawing = false;
+  };
+
+  // ---- Recent colors --------------------------------------------------------
+
+  const renderRecentColors = () => {
+    if (!recentColorsEl) {
+      return;
+    }
+
+    recentColorsEl.replaceChildren();
+    state.editor.recentColors.forEach((color) => {
+      const swatch = document.createElement("button");
+      swatch.type = "button";
+      swatch.className = "recent-color";
+      swatch.style.setProperty("--swatch", color);
+      swatch.dataset.editorColor = color;
+      swatch.title = color;
+      swatch.setAttribute("aria-label", `Use ${color}`);
+      swatch.addEventListener("click", () => setEditorColor(color));
+      recentColorsEl.append(swatch);
+    });
+  };
+
+  const pushRecentColor = (value: string) => {
+    const color = normalizeHexColor(value);
+
+    if (!color) {
+      return;
+    }
+
+    const next = [color, ...state.editor.recentColors.filter((entry) => entry !== color)];
+    state.editor.recentColors = next.slice(0, 10);
+    renderRecentColors();
+  };
+
+  // ---- Zoom + grid overlay --------------------------------------------------
+
+  const ZOOM_MIN = 1;
+  const ZOOM_MAX = 8;
+
+  const positionGridOverlay = () => {
+    if (!gridOverlay || !pixelCanvas) {
+      return;
+    }
+
+    if (!state.editor.showGrid) {
+      gridOverlay.style.opacity = "0";
+      return;
+    }
+
+    const metrics = getCanvasMetrics();
+    if (!metrics) {
+      return;
+    }
+
+    gridOverlay.style.transform = `translate3d(${metrics.offsetLeft}px, ${metrics.offsetTop}px, 0)`;
+    gridOverlay.style.width = `${metrics.rect.width}px`;
+    gridOverlay.style.height = `${metrics.rect.height}px`;
+    gridOverlay.style.setProperty("--grid-cells", String(state.editor.gridSize));
+    gridOverlay.style.opacity = "1";
+  };
+
+  const applyZoom = () => {
+    if (!pixelCanvas) {
+      return;
+    }
+
+    pixelCanvas.style.width = "";
+    pixelCanvas.style.height = "";
+
+    if (state.editor.zoom > 1) {
+      const base = pixelCanvas.getBoundingClientRect().width;
+      const scaled = Math.round(base * state.editor.zoom);
+      pixelCanvas.style.width = `${scaled}px`;
+      pixelCanvas.style.height = `${scaled}px`;
+    }
+
+    invalidateCanvasRect();
+    positionGridOverlay();
+  };
+
+  const setZoom = (zoom: number) => {
+    const next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(zoom)));
+
+    if (next === state.editor.zoom) {
+      return;
+    }
+
+    state.editor.zoom = next;
+    applyZoom();
+    setStatus(next === 1 ? "Zoom reset to fit." : `Zoom ${next}×.`);
+  };
+
+  const zoomBy = (delta: number) => setZoom(state.editor.zoom + delta);
+
+  const setShowGrid = (show: boolean) => {
+    state.editor.showGrid = show;
+    const button = document.getElementById("toggle-grid");
+    button?.classList.toggle("is-active", show);
+    button?.setAttribute("aria-pressed", String(show));
+    positionGridOverlay();
+  };
+
+  const toggleGrid = () => setShowGrid(!state.editor.showGrid);
+
+  const adjustBrush = (delta: number) => {
+    const next = Math.max(1, Math.min(8, state.editor.brushSize + delta));
+
+    if (next === state.editor.brushSize) {
+      return;
+    }
+
+    state.editor.brushSize = next;
+
+    if (brushSize) {
+      brushSize.value = String(next);
+    }
+
+    setStatus(`Brush size ${next}.`);
+  };
+
   const hidePixelCursor = () => {
     if (pixelCursor) {
       pixelCursor.style.opacity = "0";
@@ -1484,16 +3379,28 @@ export function initWorkspace() {
       return;
     }
 
-    const rect = pixelCanvas.getBoundingClientRect();
+    const metrics = getCanvasMetrics();
+
+    if (!metrics) {
+      hidePixelCursor();
+      return;
+    }
+
+    const { rect, offsetLeft, offsetTop } = metrics;
     const cell = rect.width / state.editor.gridSize;
     const span = state.editor.tool === "picker" ? 1 : state.editor.brushSize;
     const startX = state.editor.tool === "picker" ? pixel.x : brushOrigin(pixel.x);
     const startY = state.editor.tool === "picker" ? pixel.y : brushOrigin(pixel.y);
+    const width = `${cell * span}px`;
+    const height = `${cell * span}px`;
 
-    pixelCursor.style.width = `${cell * span}px`;
-    pixelCursor.style.height = `${cell * span}px`;
-    pixelCursor.style.left = `${pixelCanvas.offsetLeft + startX * cell}px`;
-    pixelCursor.style.top = `${pixelCanvas.offsetTop + startY * cell}px`;
+    if (pixelCursor.style.width !== width) {
+      pixelCursor.style.width = width;
+    }
+    if (pixelCursor.style.height !== height) {
+      pixelCursor.style.height = height;
+    }
+    pixelCursor.style.transform = `translate3d(${offsetLeft + startX * cell}px, ${offsetTop + startY * cell}px, 0)`;
     pixelCursor.dataset.tool = state.editor.tool;
     pixelCursor.style.opacity = "1";
   };
@@ -1502,10 +3409,68 @@ export function initWorkspace() {
   pixelCanvas?.addEventListener("pointermove", updatePixelCursor);
   pixelCanvas?.addEventListener("pointerenter", updatePixelCursor);
   pixelCanvas?.addEventListener("pointerleave", hidePixelCursor);
+  // Shift-drag with pencil/eraser draws a constrained straight line. We reuse
+  // the shape backup machinery, remembering whether we're painting or erasing.
+  let freehandLineErase: boolean | null = null;
+
+  const drawFreehandLinePreview = (
+    target: { x: number; y: number },
+    erase: boolean,
+  ) => {
+    const layer = activeLayer();
+
+    if (!layer || !shapeOrigin || !shapeBackup) {
+      return;
+    }
+
+    layer.pixels = shapeBackup.slice();
+    const end = constrainLine(shapeOrigin, target);
+    plotLine(shapeOrigin.x, shapeOrigin.y, end.x, end.y, (x, y) =>
+      paintPixel(layer, x, y, erase),
+    );
+    state.editor.dirty = true;
+    scheduleDraw();
+  };
+
+  // Hold Space to pan the (zoomed) canvas by dragging.
+  let spaceHeld = false;
+  let panState: { startX: number; startY: number; scrollLeft: number; scrollTop: number } | null =
+    null;
+
+  const sampleColorAt = (pixel: { x: number; y: number }) => {
+    const size = state.editor.gridSize;
+    const color = compositeLayers(state.editor.layers, size)[pixel.y * size + pixel.x];
+
+    if (color) {
+      setEditorColor(color);
+    }
+  };
+
   pixelCanvas?.addEventListener("pointerdown", (event) => {
+    // Refresh the cached geometry once at the start of every interaction.
+    invalidateCanvasRect();
+
+    // Space-pan takes priority over every tool.
+    if (spaceHeld && canvasWrap && pixelCanvas) {
+      panState = {
+        startX: event.clientX,
+        startY: event.clientY,
+        scrollLeft: canvasWrap.scrollLeft,
+        scrollTop: canvasWrap.scrollTop,
+      };
+      pixelCanvas.setPointerCapture(event.pointerId);
+      return;
+    }
+
     const pixel = pixelFromEvent(event);
 
     if (!pixel || !pixelCanvas) {
+      return;
+    }
+
+    // Alt = temporary eyedropper on any painting tool.
+    if (event.altKey && state.editor.tool !== "move") {
+      sampleColorAt(pixel);
       return;
     }
 
@@ -1559,6 +3524,36 @@ export function initWorkspace() {
       return;
     }
 
+    if (state.editor.tool === "fill") {
+      const size = state.editor.gridSize;
+      const layer = activeLayer();
+      const target = layer ? layer.pixels[pixel.y * size + pixel.x] ?? null : null;
+
+      if (layer && target !== state.editor.color) {
+        pushHistory();
+        floodFill(pixel.x, pixel.y);
+        pushRecentColor(state.editor.color);
+      }
+
+      return;
+    }
+
+    if (SHAPE_TOOLS.has(state.editor.tool)) {
+      beginShapeStroke(pixel);
+      pixelCanvas.setPointerCapture(event.pointerId);
+      drawShapePreview(pixel, event.shiftKey);
+      return;
+    }
+
+    // Shift + pencil/eraser starts a constrained straight-line stroke.
+    if (event.shiftKey && (state.editor.tool === "pencil" || state.editor.tool === "erase")) {
+      beginShapeStroke(pixel);
+      freehandLineErase = state.editor.tool === "erase";
+      pixelCanvas.setPointerCapture(event.pointerId);
+      drawFreehandLinePreview(pixel, freehandLineErase);
+      return;
+    }
+
     state.editor.drawing = true;
 
     if (state.editor.tool !== "picker") {
@@ -1569,6 +3564,12 @@ export function initWorkspace() {
     applyTool(pixel.x, pixel.y);
   });
   pixelCanvas?.addEventListener("pointermove", (event) => {
+    if (panState && canvasWrap) {
+      canvasWrap.scrollLeft = panState.scrollLeft - (event.clientX - panState.startX);
+      canvasWrap.scrollTop = panState.scrollTop - (event.clientY - panState.startY);
+      return;
+    }
+
     if (state.editor.tool === "move") {
       if (!moveState || !state.editor.drawing) {
         return;
@@ -1596,7 +3597,7 @@ export function initWorkspace() {
           x: moveState.dragStartOffset.x + dx,
           y: moveState.dragStartOffset.y + dy,
         };
-        renderPixels();
+        scheduleDraw();
         updateSelectionOverlay();
       }
 
@@ -1609,11 +3610,51 @@ export function initWorkspace() {
 
     const pixel = pixelFromEvent(event);
 
-    if (pixel) {
-      applyTool(pixel.x, pixel.y);
+    if (!pixel) {
+      return;
     }
+
+    if (freehandLineErase !== null) {
+      drawFreehandLinePreview(pixel, freehandLineErase);
+      return;
+    }
+
+    if (SHAPE_TOOLS.has(state.editor.tool) && shapeOrigin) {
+      drawShapePreview(pixel, event.shiftKey);
+      return;
+    }
+
+    applyTool(pixel.x, pixel.y);
   });
   pixelCanvas?.addEventListener("pointerup", () => {
+    if (panState) {
+      panState = null;
+      return;
+    }
+
+    if (freehandLineErase !== null) {
+      finishShapeStroke();
+      freehandLineErase = null;
+      pushRecentColor(state.editor.color);
+      finalizeStroke();
+      return;
+    }
+
+    if (SHAPE_TOOLS.has(state.editor.tool) && shapeOrigin) {
+      finishShapeStroke();
+      pushRecentColor(state.editor.color);
+      finalizeStroke();
+      return;
+    }
+
+    // Remember the colour for freehand paint strokes (not erase/pick/move).
+    if (
+      state.editor.drawing &&
+      (state.editor.tool === "pencil" || state.editor.tool === "recolor")
+    ) {
+      pushRecentColor(state.editor.color);
+    }
+
     if (state.editor.tool === "move" && moveState) {
       if (moveState.phase === "selecting") {
         state.editor.drawing = false;
@@ -1650,14 +3691,27 @@ export function initWorkspace() {
       } else if (moveState.phase === "moving") {
         moveState.phase = "placed";
         state.editor.drawing = false;
+        finalizeStroke();
       }
 
       return;
     }
 
     state.editor.drawing = false;
+    finalizeStroke();
   });
   pixelCanvas?.addEventListener("pointercancel", () => {
+    if (panState) {
+      panState = null;
+      return;
+    }
+
+    if (freehandLineErase !== null || (SHAPE_TOOLS.has(state.editor.tool) && shapeOrigin)) {
+      cancelActiveStroke();
+      freehandLineErase = null;
+      return;
+    }
+
     if (state.editor.tool === "move" && moveState) {
       if (moveState.phase === "moving") {
         moveState.offset = { ...moveState.dragStartOffset };
@@ -1680,6 +3734,12 @@ export function initWorkspace() {
     if (state.editor.tool === "move" && tool !== "move") {
       commitMoveState();
       renderPixels();
+    }
+
+    // Drop any half-finished line/shape stroke when switching tools.
+    if (shapeOrigin) {
+      finishShapeStroke();
+      freehandLineErase = null;
     }
 
     state.editor.tool = tool;
@@ -1715,27 +3775,182 @@ export function initWorkspace() {
     });
   });
 
+  // Ctrl+1-9 = primary tools. Ctrl+Shift+1-9 and Ctrl+Alt+1-9 are reserved
+  // overflow tiers for actions beyond the first nine; a few are wired today and
+  // the rest are ready for future tools.
+  const PRIMARY_TOOLS: Record<string, Tool> = {
+    "1": "pencil",
+    "2": "erase",
+    "3": "picker",
+    "4": "recolor",
+    "5": "move",
+    "6": "fill",
+    "7": "line",
+    "8": "rect",
+    "9": "ellipse",
+  };
+  const SECONDARY_ACTIONS: Record<string, () => void> = {
+    "1": toggleGrid,
+    "2": () => zoomBy(1),
+    "3": () => zoomBy(-1),
+    "4": () => setZoom(1),
+  };
+  const TERTIARY_ACTIONS: Record<string, () => void> = {};
+
+  const digitFromEvent = (event: KeyboardEvent) => {
+    if (/^[1-9]$/.test(event.key)) {
+      return event.key;
+    }
+    // Fall back to the physical key so Shift/Alt combos (which change event.key)
+    // still resolve to the right number.
+    return event.code.startsWith("Digit") ? event.code.slice(5) : "";
+  };
+
   document.addEventListener("keydown", (event) => {
-    if (event.ctrlKey && !event.shiftKey && !event.altKey) {
-      const toolByKey: Record<string, Tool> = {
-        "1": "pencil",
-        "2": "erase",
-        "3": "picker",
-        "4": "recolor",
-        "5": "move",
-      };
-      const tool = toolByKey[event.key];
+    const editorOpen = editorDrawer?.getAttribute("aria-hidden") === "false";
 
-      if (tool) {
-        const editorOpen = editorDrawer?.getAttribute("aria-hidden") === "false";
+    if (!editorOpen) {
+      return;
+    }
 
-        if (editorOpen) {
-          event.preventDefault();
-          setActiveTool(tool);
+    const target = event.target as HTMLElement | null;
+    const typing =
+      !!target &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable);
+
+    // Hold Space to pan — but never steal Space from a focused control.
+    if (
+      event.code === "Space" &&
+      !typing &&
+      (target === document.body ||
+        target === pixelCanvas ||
+        target === canvasWrap ||
+        target === editorDrawer)
+    ) {
+      spaceHeld = true;
+      canvasWrap?.classList.add("is-panning");
+      event.preventDefault();
+      return;
+    }
+
+    const mod = event.ctrlKey || event.metaKey;
+
+    if (mod) {
+      const key = event.key.toLowerCase();
+
+      if (!event.altKey && key === "z") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          redoEdit();
+        } else {
+          undoEdit();
+        }
+        return;
+      }
+
+      if (!event.shiftKey && !event.altKey && key === "y") {
+        event.preventDefault();
+        redoEdit();
+        return;
+      }
+
+      if (!event.shiftKey && !event.altKey && (key === "delete" || key === "backspace")) {
+        event.preventDefault();
+        clearActiveLayer();
+        return;
+      }
+
+      if (!event.shiftKey && !event.altKey && (key === "=" || key === "+")) {
+        event.preventDefault();
+        zoomBy(1);
+        return;
+      }
+
+      if (!event.shiftKey && !event.altKey && (key === "-" || key === "_")) {
+        event.preventDefault();
+        zoomBy(-1);
+        return;
+      }
+
+      if (!event.shiftKey && !event.altKey && key === "0") {
+        event.preventDefault();
+        setZoom(1);
+        return;
+      }
+
+      const digit = digitFromEvent(event);
+
+      if (digit) {
+        if (event.altKey && !event.shiftKey) {
+          const action = TERTIARY_ACTIONS[digit];
+          if (action) {
+            event.preventDefault();
+            action();
+          }
+          return;
+        }
+
+        if (event.shiftKey && !event.altKey) {
+          const action = SECONDARY_ACTIONS[digit];
+          if (action) {
+            event.preventDefault();
+            action();
+          }
+          return;
+        }
+
+        if (!event.shiftKey && !event.altKey) {
+          const tool = PRIMARY_TOOLS[digit];
+          if (tool) {
+            event.preventDefault();
+            setActiveTool(tool);
+          }
         }
       }
+
+      return;
+    }
+
+    if (typing) {
+      return;
+    }
+
+    if (event.key === "[") {
+      event.preventDefault();
+      adjustBrush(-1);
+      return;
+    }
+
+    if (event.key === "]") {
+      event.preventDefault();
+      adjustBrush(1);
     }
   });
+
+  document.addEventListener("keyup", (event) => {
+    if (event.code === "Space") {
+      spaceHeld = false;
+      panState = null;
+      canvasWrap?.classList.remove("is-panning");
+    }
+  });
+
+  let resizeFrame = 0;
+  window.addEventListener("resize", () => {
+    if (editorDrawer?.getAttribute("aria-hidden") !== "false" || resizeFrame) {
+      return;
+    }
+
+    resizeFrame = window.requestAnimationFrame(() => {
+      resizeFrame = 0;
+      applyZoom();
+    });
+  });
+
+  // Panning the zoomed canvas moves it, so the cached geometry must refresh.
+  canvasWrap?.addEventListener("scroll", invalidateCanvasRect, { passive: true });
 
   drawColor?.addEventListener("input", () => {
     setEditorColor(drawColor.value);
@@ -1773,9 +3988,11 @@ export function initWorkspace() {
       layer.pixels = createPixels(next);
     });
     state.editor.history = [];
+    state.editor.redo = [];
     state.editor.dirty = true;
     renderLayers();
     renderPixels();
+    positionGridOverlay();
   });
 
   const normalizeBrushSize = () => {
@@ -1806,29 +4023,12 @@ export function initWorkspace() {
 
   setEditorColor(state.editor.color);
 
-  document.getElementById("clear-canvas")?.addEventListener("click", () => {
-    const layer = activeLayer();
-
-    if (!layer) {
-      return;
-    }
-
-    pushHistory();
-    layer.pixels = createPixels(state.editor.gridSize);
-    state.editor.dirty = true;
-    renderPixels();
-  });
-
-  document.getElementById("undo-canvas")?.addEventListener("click", () => {
-    const previous = state.editor.history.pop();
-
-    if (!previous) {
-      return;
-    }
-
-    restoreSnapshot(previous);
-    state.editor.dirty = true;
-  });
+  document.getElementById("clear-canvas")?.addEventListener("click", clearActiveLayer);
+  document.getElementById("undo-canvas")?.addEventListener("click", undoEdit);
+  document.getElementById("redo-canvas")?.addEventListener("click", redoEdit);
+  document.getElementById("zoom-in")?.addEventListener("click", () => zoomBy(1));
+  document.getElementById("zoom-out")?.addEventListener("click", () => zoomBy(-1));
+  document.getElementById("toggle-grid")?.addEventListener("click", toggleGrid);
 
   document.getElementById("add-layer")?.addEventListener("click", addLayer);
 
@@ -2074,6 +4274,10 @@ export function initWorkspace() {
     if (event.key === "Escape" && newTextureModal?.getAttribute("aria-hidden") === "false") {
       setNewTextureModalOpen(false);
     }
+
+    if (event.key === "Escape" && resourceAiSetupModal?.getAttribute("aria-hidden") === "false") {
+      closeResourceAiSetup();
+    }
   });
 
   const importTextureFromFile = (file: File) => {
@@ -2133,6 +4337,22 @@ export function initWorkspace() {
     console.warn("Texture progress events are available inside the Tauri shell only.", error);
   });
 
+  assetGrid?.addEventListener("scroll", scheduleAssetWindowRender, { passive: true });
+
+  if (assetGrid && "ResizeObserver" in window) {
+    new ResizeObserver(() => {
+      updateAssetGridMetrics();
+      renderedAssetWindow = "";
+      scheduleAssetWindowRender();
+    }).observe(assetGrid);
+  } else {
+    window.addEventListener("resize", () => {
+      updateAssetGridMetrics();
+      renderedAssetWindow = "";
+      scheduleAssetWindowRender();
+    });
+  }
+
   assetSearch?.addEventListener("input", () => {
     state.query = assetSearch.value;
     renderAssetGrid();
@@ -2165,9 +4385,114 @@ export function initWorkspace() {
   document.getElementById("return-main-menu")?.addEventListener("click", () => {
     closeEditor();
     closeExportModal();
-    workspaceScreen?.setAttribute("hidden", "");
-    homeScreen?.removeAttribute("hidden");
+    showScreen("home-screen");
   });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-ai-provider]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const provider = button.dataset.aiProvider as ResourceAiProvider | undefined;
+
+      if (isResourceAiProvider(provider)) {
+        selectResourceAiProvider(provider);
+      }
+    });
+  });
+
+  resourceAiModelInput?.addEventListener("input", syncResourceAiModelPresets);
+
+  resourceAiSetupForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const settings = RESOURCE_AI_PROVIDERS[resourceAiSelectedProvider];
+    const model = resourceAiModelInput?.value.trim() ?? "";
+    const apiKey = resourceAiApiKeyInput?.value.trim() ?? "";
+    const baseUrl = resourceAiBaseUrlInput?.value.trim() || settings.baseUrl;
+
+    if (!model) {
+      resourceAiModelInput?.focus();
+      setStatus("Choose an AI model.");
+      return;
+    }
+
+    if (settings.apiKeyRequired && !apiKey) {
+      resourceAiApiKeyInput?.focus();
+      setStatus("Enter an API key.");
+      return;
+    }
+
+    saveResourceAiConfig({
+      provider: resourceAiSelectedProvider,
+      baseUrl,
+      apiKey,
+      model,
+    });
+    closeResourceAiSetup();
+    setStatus(`${settings.title} is ready.`);
+    syncResourceAiSend();
+    updateResourceAiImageWarning();
+  });
+
+  resourceAiSetupClose?.addEventListener("click", closeResourceAiSetup);
+  resourceAiCancelSetup?.addEventListener("click", closeResourceAiSetup);
+  resourceAiSetupModal?.addEventListener("mousedown", (event) => {
+    if (event.target === resourceAiSetupModal) {
+      closeResourceAiSetup();
+    }
+  });
+
+  resourceAiPlus?.addEventListener("click", () => {
+    resourceAiImageInput?.click();
+  });
+
+  resourceAiImageInput?.addEventListener("change", () => {
+    void addResourceAiPendingImages(resourceAiImageInput.files);
+    resourceAiImageInput.value = "";
+  });
+
+  resourceAiNewConversation?.addEventListener("click", resetResourceAiConversation);
+
+  const resourceAiSettings = document.getElementById("resource-ai-settings") as HTMLButtonElement | null;
+  resourceAiSettings?.addEventListener("click", openResourceAiSetup);
+
+  // The shader workspace's AI panel opens the same provider setup modal.
+  document.addEventListener("anvil:open-ai-setup", openResourceAiSetup);
+
+  resourceAiToggle?.addEventListener("click", () => {
+    setResourceAiCollapsed(!isResourceAiCollapsedOrCollapsing());
+  });
+
+  document.getElementById("resource-ai-composer")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (resourceAiRequestActive) {
+      stopResourceAiRequest();
+      return;
+    }
+    void submitResourceAiPrompt(resourceAiInput?.value ?? "");
+  });
+
+  resourceAiInput?.addEventListener("input", () => {
+    resizeResourceAiInput();
+    syncResourceAiSend();
+  });
+
+  resourceAiInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void submitResourceAiPrompt(resourceAiInput.value);
+    } else if (event.key === "Enter" && event.shiftKey) {
+      window.setTimeout(resizeResourceAiInput);
+    }
+  });
+
+  resourceAiInput?.addEventListener("paste", (event) => {
+    const imageFiles = resourceImageFilesFromPaste(event.clipboardData);
+    if (!imageFiles.length) {
+      return;
+    }
+    event.preventDefault();
+    void addResourceAiPendingImages(imageFiles);
+  });
+
+  syncResourceAiSend();
 
   return {
     open(project: WorkspaceProject = { name: "Untitled Pack" }) {
@@ -2185,11 +4510,10 @@ export function initWorkspace() {
         description: project.description,
         iconDataUrl: project.iconDataUrl,
       };
-      homeScreen?.setAttribute("hidden", "");
-      shaderWorkspace?.setAttribute("hidden", "");
-      workspaceScreen?.removeAttribute("hidden");
+      showScreen("project-workspace");
       closeEditor();
       closeExportModal();
+      resetResourceAiConversation();
       setStatus("Loading vanilla textures for this Minecraft version...");
       void loadAssets();
     },

@@ -1,8 +1,8 @@
 {
   "name": "anvil",
   "private": true,
-  "version": "0.1.2",
-  "description": "Desktop toolkit for Minecraft creators, starting with texture-pack editing.",
+  "version": "0.1.3",
+  "description": "Desktop toolkit for Minecraft creators, starting with resource-pack editing.",
   "license": "MIT",
   "repository": {
     "type": "git",

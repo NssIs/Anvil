@@ -84,7 +84,7 @@ async function loadReleases() {
     byId("linux-btn"),
     byId("linux-meta"),
     pickAsset(assets, [".appimage"]) || pickAsset(assets, [".deb"]),
-    ".AppImage / .deb",
+    ".appimage / .deb",
   );
 
   const line = byId("version-line");

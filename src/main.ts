@@ -534,6 +534,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const projectLibraryModal = document.getElementById("project-library-modal");
   const projectLibraryList = document.getElementById("project-library-list");
   const deleteModal = document.getElementById("delete-modal");
+  const deleteModalTitle = document.getElementById("delete-modal-title");
   const deleteModalBody = document.getElementById("delete-body");
   const confirmDeleteButton = document.getElementById("confirm-delete") as HTMLButtonElement | null;
   const librarySearch = document.getElementById("library-search") as HTMLInputElement | null;
@@ -591,18 +592,18 @@ window.addEventListener("DOMContentLoaded", () => {
           nameLabel: "Shader pack name",
           namePlaceholder: "Aurora Shade",
           versionLabel: "Compatibility target",
-          versionStatus: "Optional target, example: 1.21.6",
+          versionStatus: "Shader packs target Minecraft 1.21.x (Iris)",
           descriptionPlaceholder: "Soft lighting, colored skies, and water tweaks.",
           empty: "No projects yet.",
         }
       : {
-          title: "Texture pack",
-          editTitle: "Edit texture pack",
-          nameLabel: "Texture pack name",
+          title: "Resource pack",
+          editTitle: "Edit resource pack",
+          nameLabel: "Resource pack name",
           namePlaceholder: "Nightfall Tweaks",
           versionLabel: "Minecraft version",
           versionStatus: "Example: 1.16.5",
-          descriptionPlaceholder: "A clean texture pack for survival worlds.",
+          descriptionPlaceholder: "A clean resource pack for survival worlds.",
           empty: "No projects yet.",
         };
 
@@ -645,6 +646,18 @@ window.addEventListener("DOMContentLoaded", () => {
 
     if (versionStatus) {
       versionStatus.textContent = copy.versionStatus;
+    }
+
+    // Shader packs only support the 1.21.x pipeline — pin the field.
+    if (minecraftVersion) {
+      const isShader = projectType === "shader";
+      minecraftVersion.readOnly = isShader;
+      if (isShader) {
+        minecraftVersion.value = "1.21";
+      } else if (minecraftVersion.value === "1.21") {
+        minecraftVersion.value = "";
+      }
+      versionCombobox?.classList.toggle("version-combobox--locked", isShader);
     }
 
     if (packDescription) {
@@ -809,6 +822,11 @@ window.addEventListener("DOMContentLoaded", () => {
   const openDeleteModal = (project: PersistedProject) => {
     deleteTarget = project;
 
+    if (deleteModalTitle) {
+      deleteModalTitle.textContent =
+        project.projectType === "shader" ? "Delete shader pack" : "Delete resource pack";
+    }
+
     if (deleteModalBody) {
       const savedData = project.projectType === "shader" ? "saved shader files" : "saved textures";
       deleteModalBody.textContent = `Deleting “${project.name}” erases its ${savedData} and project data from this computer. This action cannot be undone.`;
@@ -893,19 +911,19 @@ window.addEventListener("DOMContentLoaded", () => {
     card.className = "project-card project-card--menu";
     card.dataset.projectId = project.id;
 
-    const typeLabel = project.projectType === "shader" ? "Shader pack" : "Texture pack";
+    const typeLabel = project.projectType === "shader" ? "Shader pack" : "Resource pack";
     const plainDescription = stripHtml(project.description).trim();
     const description =
       plainDescription ||
       (project.projectType === "shader"
         ? `${project.minecraftVersion} shader target by ${project.author}.`
-        : `${project.minecraftVersion} texture pack by ${project.author}.`);
+        : `${project.minecraftVersion} resource pack by ${project.author}.`);
     const iconLabel = project.name
       .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() ?? "")
-      .join("") || (project.projectType === "shader" ? "S" : "TP");
+      .join("") || (project.projectType === "shader" ? "S" : "RP");
 
     const launch = document.createElement("button");
     launch.className = "project-card-launch";
@@ -1079,6 +1097,16 @@ window.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    // Shader packs are pinned to 1.21.x — no version browsing.
+    if (selectedProjectType === "shader") {
+      versionStatus.textContent = "Shader packs target Minecraft 1.21.x (Iris)";
+      versionStatus.className = "version-status";
+      versionCombobox?.classList.remove("version-combobox--invalid");
+      versionCombobox?.classList.add("version-combobox--valid");
+      setVersionMenuOpen(false);
+      return;
+    }
+
     const value = minecraftVersion.value.trim();
     const exactMatch = minecraftVersions.includes(value);
     const matches = value
@@ -1089,8 +1117,7 @@ window.addEventListener("DOMContentLoaded", () => {
     versionCombobox?.classList.toggle("version-combobox--valid", exactMatch);
 
     if (!value) {
-      versionStatus.textContent =
-        selectedProjectType === "shader" ? "Optional target, example: 1.21.6" : "Example: 1.16.5";
+      versionStatus.textContent = "Example: 1.16.5";
       versionStatus.className = "version-status";
       setVersionMenuOpen(false);
       return;
@@ -1185,6 +1212,46 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   void loadContributors();
 
+  const aboutButton = document.getElementById("about-button");
+  const aboutMenu = document.getElementById("about-menu");
+  const policiesModal = document.getElementById("policies-modal");
+
+  const setAboutMenuOpen = (open: boolean) => {
+    aboutMenu?.setAttribute("aria-hidden", String(!open));
+    aboutButton?.setAttribute("aria-expanded", String(open));
+  };
+
+  const closePoliciesModal = () => {
+    policiesModal?.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("modal-open");
+  };
+
+  aboutButton?.addEventListener("click", () => {
+    setAboutMenuOpen(aboutMenu?.getAttribute("aria-hidden") === "true");
+  });
+  document.addEventListener("click", (event) => {
+    if (!(event.target as HTMLElement).closest(".about-menu-wrap")) {
+      setAboutMenuOpen(false);
+    }
+  });
+  document.getElementById("about-policies")?.addEventListener("click", () => {
+    setAboutMenuOpen(false);
+    policiesModal?.setAttribute("aria-hidden", "false");
+    document.body.classList.add("modal-open");
+  });
+  document.getElementById("close-policies")?.addEventListener("click", closePoliciesModal);
+  policiesModal?.querySelectorAll<HTMLAnchorElement>("a.policies-link").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      openExternal(link.href);
+    });
+  });
+  policiesModal?.addEventListener("mousedown", (event) => {
+    if (event.target === policiesModal) {
+      closePoliciesModal();
+    }
+  });
+
   document.getElementById("cancel-project")?.addEventListener("click", () => {
     setModalOpen(false);
   });
@@ -1218,8 +1285,12 @@ window.addEventListener("DOMContentLoaded", () => {
     if (event.key === "Escape" && deleteModal?.getAttribute("aria-hidden") === "false") {
       closeDeleteModal();
     }
+    if (event.key === "Escape" && policiesModal?.getAttribute("aria-hidden") === "false") {
+      closePoliciesModal();
+    }
     if (event.key === "Escape") {
       closeProjectActions();
+      setAboutMenuOpen(false);
     }
   });
 

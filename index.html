@@ -12,6 +12,20 @@
     <main class="app-shell">
       <header class="titlebar" data-tauri-drag-region>
         <div class="app-title" data-tauri-drag-region>Anvil</div>
+        <div class="about-menu-wrap">
+          <button
+            class="about-button"
+            id="about-button"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+          >
+            About
+          </button>
+          <div class="about-menu" id="about-menu" aria-hidden="true">
+            <button class="project-menu-item" id="about-policies" type="button">Policies</button>
+          </div>
+        </div>
         <div class="window-controls" aria-label="Window controls">
           <button
             class="window-control window-control--minimize"
@@ -46,7 +60,7 @@
             class="project-list"
             id="recent-project-list"
             aria-live="polite"
-            aria-label="Recent texture pack projects"
+            aria-label="Recent resource pack projects"
           ></div>
           <button class="secondary-button show-all-projects" id="show-all-projects" type="button" hidden>
             Show all
@@ -101,14 +115,14 @@
       <section
         class="project-workspace"
         id="project-workspace"
-        aria-label="Texture pack workspace"
+        aria-label="Resource pack workspace"
         hidden
       >
         <aside class="workspace-sidebar">
           <div class="workspace-project-card">
-            <div class="workspace-project-icon" id="workspace-project-icon">TP</div>
+            <div class="workspace-project-icon" id="workspace-project-icon">RP</div>
             <div>
-              <p class="section-kicker">Texture Pack</p>
+              <p class="section-kicker">Resource Pack</p>
               <h1 id="workspace-project-name">Untitled Pack</h1>
             </div>
           </div>
@@ -151,44 +165,85 @@
           </button>
         </aside>
 
-        <section class="asset-workbench">
-          <header class="workspace-toolbar">
-            <div class="workspace-title-block">
-              <p class="section-kicker">Workspace</p>
-              <h2>Textures</h2>
-            </div>
-            <label class="asset-search">
-              <span>Search assets</span>
-              <input
-                id="asset-search"
-                type="search"
-                placeholder="Search block, item, or entity"
-                autocomplete="off"
-              />
-            </label>
-            <button class="export-button" id="export-button" type="button">
-              Export
-            </button>
-          </header>
+        <div class="resource-workbench" id="resource-workbench">
+          <section class="asset-workbench">
+            <header class="workspace-toolbar">
+              <div class="workspace-title-block">
+                <p class="section-kicker">Workspace</p>
+                <h2>Textures</h2>
+              </div>
+              <label class="asset-search">
+                <span>Search assets</span>
+                <input
+                  id="asset-search"
+                  type="search"
+                  placeholder="Search block, item, or entity"
+                  autocomplete="off"
+                />
+              </label>
+              <button class="export-button" id="export-button" type="button">
+                Export
+              </button>
+            </header>
 
-          <div class="workspace-status" id="workspace-status" role="status">
-            Ready.
-          </div>
-          <div class="texture-loading" id="texture-loading" aria-hidden="true">
-            <div class="texture-loading-panel">
-              <div class="texture-loading-topline">
-                <span id="texture-loading-stage">Pulling textures</span>
-                <strong id="texture-loading-percent">0%</strong>
-              </div>
-              <div class="texture-progress-track" aria-hidden="true">
-                <span id="texture-progress-bar"></span>
-              </div>
-              <p id="texture-loading-message">Preparing Minecraft assets.</p>
-              <small id="texture-loading-eta">Estimating time...</small>
+            <div class="workspace-status" id="workspace-status" role="status">
+              Ready.
             </div>
-          </div>
-          <div class="asset-grid" id="asset-grid" aria-label="Minecraft assets"></div>
-        </section>
+            <div class="texture-loading" id="texture-loading" aria-hidden="true">
+              <div class="texture-loading-panel">
+                <div class="texture-loading-topline">
+                  <span id="texture-loading-stage">Pulling textures</span>
+                  <strong id="texture-loading-percent">0%</strong>
+                </div>
+                <div class="texture-progress-track" aria-hidden="true">
+                  <span id="texture-progress-bar"></span>
+                </div>
+                <p id="texture-loading-message">Preparing Minecraft assets.</p>
+                <small id="texture-loading-eta">Estimating time...</small>
+              </div>
+            </div>
+            <div class="asset-grid" id="asset-grid" aria-label="Minecraft assets"></div>
+          </section>
+
+          <aside class="resource-ai-split" id="resource-ai-split" aria-label="AI assistant">
+            <button class="ai-panel-toggle" id="resource-ai-toggle" type="button" aria-label="Collapse AI" aria-expanded="true">
+              <span class="ai-toggle-icon" aria-hidden="true"></span>
+            </button>
+            <button class="ai-settings-button" id="resource-ai-settings" type="button" aria-label="AI settings">
+              <span class="ai-settings-icon" aria-hidden="true"></span>
+            </button>
+            <button class="ai-new-conversation" id="resource-ai-new-conversation" type="button" aria-label="New conversation">
+              <span class="ai-new-icon" aria-hidden="true"></span>
+            </button>
+            <span class="ai-center-icon" aria-hidden="true"></span>
+            <div class="ai-thread" id="resource-ai-thread" aria-live="polite"></div>
+            <form class="ai-composer" id="resource-ai-composer">
+              <div class="ai-composer-meta">
+                <span class="ai-context-status" id="resource-ai-context-status">No tokens used yet</span>
+                <span class="ai-image-warning" id="resource-ai-image-warning" hidden>⚠ Model may not read images</span>
+              </div>
+              <div class="ai-pending-attachments" id="resource-ai-pending-attachments" hidden></div>
+              <div class="ai-input-row">
+                <button class="ai-plus" id="resource-ai-plus" type="button" aria-label="Add context">
+                  <span aria-hidden="true">+</span>
+                </button>
+                <textarea
+                  id="resource-ai-input"
+                  class="ai-input"
+                  rows="1"
+                  placeholder="Ask AI"
+                  spellcheck="false"
+                  aria-label="Ask AI"
+                ></textarea>
+                <button class="ai-send" id="resource-ai-send" type="submit" aria-label="Send to assistant">
+                  <span aria-hidden="true">↑</span>
+                </button>
+              </div>
+              <input class="ai-file-input" id="resource-ai-image-input" type="file" accept="image/*" multiple hidden />
+            </form>
+          </aside>
+        </div>
+
 
         <section class="editor-drawer" id="editor-drawer" aria-hidden="true">
           <header class="editor-header">
@@ -205,6 +260,20 @@
                 <span>Size</span>
                 <input id="brush-size" type="number" min="1" max="8" step="1" value="1" inputmode="numeric" />
               </label>
+              <div class="editor-view-controls" role="group" aria-label="Canvas view">
+                <button class="view-button" id="zoom-out" type="button" aria-label="Zoom out"
+                  data-tooltip-name="Zoom out" data-tooltip-shortcut="Ctrl+-">
+                  <span class="view-icon view-icon--zoom-out"></span>
+                </button>
+                <button class="view-button" id="zoom-in" type="button" aria-label="Zoom in"
+                  data-tooltip-name="Zoom in" data-tooltip-shortcut="Ctrl+=">
+                  <span class="view-icon view-icon--zoom-in"></span>
+                </button>
+                <button class="view-button" id="toggle-grid" type="button" aria-pressed="false" aria-label="Toggle pixel grid"
+                  data-tooltip-name="Pixel grid" data-tooltip-shortcut="Ctrl+Shift+1">
+                  <span class="view-icon view-icon--grid"></span>
+                </button>
+              </div>
             </div>
             <div class="editor-header-actions">
               <button class="secondary-button" id="import-texture" type="button">
@@ -275,12 +344,63 @@
                 <span class="tool-icon tool-icon--move"></span>
                 <span class="tool-label">Move</span>
               </button>
+              <button
+                class="tool-button"
+                type="button"
+                data-tool="fill"
+                aria-label="Fill"
+                data-tooltip-name="Fill"
+                data-tooltip-shortcut="Ctrl+6"
+              >
+                <span class="tool-icon tool-icon--fill"></span>
+                <span class="tool-label">Fill</span>
+              </button>
+              <button
+                class="tool-button"
+                type="button"
+                data-tool="line"
+                aria-label="Line (Shift to constrain)"
+                data-tooltip-name="Line"
+                data-tooltip-shortcut="Ctrl+7"
+              >
+                <span class="tool-icon tool-icon--line"></span>
+                <span class="tool-label">Line</span>
+              </button>
+              <button
+                class="tool-button"
+                type="button"
+                data-tool="rect"
+                aria-label="Rectangle (Shift to fill)"
+                data-tooltip-name="Rectangle"
+                data-tooltip-shortcut="Ctrl+8"
+              >
+                <span class="tool-icon tool-icon--rect"></span>
+                <span class="tool-label">Rect</span>
+              </button>
+              <button
+                class="tool-button"
+                type="button"
+                data-tool="ellipse"
+                aria-label="Ellipse (Shift to fill)"
+                data-tooltip-name="Ellipse"
+                data-tooltip-shortcut="Ctrl+9"
+              >
+                <span class="tool-icon tool-icon--ellipse"></span>
+                <span class="tool-label">Ellipse</span>
+              </button>
               <button class="tool-button" id="undo-canvas" type="button" aria-label="Undo"
                 data-tooltip-name="Undo"
                 data-tooltip-shortcut="Ctrl+Z"
               >
                 <span class="tool-icon tool-icon--undo"></span>
                 <span class="tool-label">Undo</span>
+              </button>
+              <button class="tool-button" id="redo-canvas" type="button" aria-label="Redo"
+                data-tooltip-name="Redo"
+                data-tooltip-shortcut="Ctrl+Y"
+              >
+                <span class="tool-icon tool-icon--redo"></span>
+                <span class="tool-label">Redo</span>
               </button>
               <button class="tool-button" id="clear-canvas" type="button" aria-label="Clear"
                 data-tooltip-name="Clear Layer"
@@ -331,11 +451,16 @@
                     <span>Hex</span>
                     <input id="draw-color" type="text" value="#7ee787" maxlength="7" spellcheck="false" />
                   </label>
+                  <div class="recent-colors-block">
+                    <span class="recent-colors-label">Recent</span>
+                    <div class="recent-colors" id="recent-colors" aria-label="Recently used colors"></div>
+                  </div>
                 </div>
               </div>
             </aside>
-            <div class="editor-canvas-wrap">
+            <div class="editor-canvas-wrap" id="editor-canvas-wrap">
               <canvas id="pixel-canvas" width="16" height="16" aria-label="Pixel canvas"></canvas>
+              <div class="pixel-grid-overlay" id="pixel-grid-overlay" aria-hidden="true"></div>
               <span class="pixel-cursor" id="pixel-cursor" aria-hidden="true"></span>
               <div class="selection-overlay" id="selection-overlay" aria-hidden="true"></div>
             </div>
@@ -370,10 +495,10 @@
               </div>
             </div>
             <div class="minecraft-pack-preview">
-              <div class="minecraft-pack-icon" id="export-pack-icon">TP</div>
+              <div class="minecraft-pack-icon" id="export-pack-icon">RP</div>
               <div class="minecraft-pack-copy">
                 <h3 id="export-pack-name">Untitled Pack</h3>
-                <p id="export-pack-description">A clean texture pack for survival worlds...</p>
+                <p id="export-pack-description">A clean resource pack for survival worlds...</p>
                 <p id="export-pack-meta">Me! ° 1.0</p>
               </div>
             </div>
@@ -461,7 +586,7 @@
         aria-label="Shader pack workspace"
         hidden
       >
-        <aside class="shader-sidebar">
+        <aside class="workspace-sidebar shader-sidebar">
           <div class="workspace-project-card">
             <div class="workspace-project-icon shader-project-icon" id="shader-project-icon">S</div>
             <div>
@@ -470,31 +595,7 @@
             </div>
           </div>
 
-          <nav class="shader-mode-nav" id="shader-mode-nav" aria-label="Workspace mode">
-            <button class="shader-mode-button is-active" type="button" data-shader-mode="visual">
-              <span class="shader-mode-icon shader-mode-icon--visual" aria-hidden="true"></span>
-              <span class="shader-mode-copy">
-                <strong>Visual builder</strong>
-                <small>Design with sliders &amp; colors</small>
-              </span>
-            </button>
-            <button class="shader-mode-button" type="button" data-shader-mode="code">
-              <span class="shader-mode-icon shader-mode-icon--code" aria-hidden="true"></span>
-              <span class="shader-mode-copy">
-                <strong>Code editor</strong>
-                <small>Files, folders &amp; GLSL</small>
-              </span>
-            </button>
-            <button class="shader-mode-button" type="button" data-shader-mode="ai">
-              <span class="shader-mode-icon shader-mode-icon--ai" aria-hidden="true"></span>
-              <span class="shader-mode-copy">
-                <strong>AI assistant</strong>
-                <small>Describe it, Anvil writes it</small>
-              </span>
-            </button>
-          </nav>
-
-          <div class="shader-stat-grid">
+          <div class="workspace-stat-grid shader-stat-grid">
             <div>
               <span id="shader-file-count">0</span>
               <small>Files</small>
@@ -504,6 +605,15 @@
               <small>Saved</small>
             </div>
           </div>
+
+          <nav class="workspace-nav shader-mode-nav" id="shader-mode-nav" aria-label="Workspace mode">
+            <button class="workspace-nav-item shader-mode-button is-active" type="button" data-shader-mode="visual">
+              Visual builder
+            </button>
+            <button class="workspace-nav-item shader-mode-button" type="button" data-shader-mode="code">
+              Code editor
+            </button>
+          </nav>
 
           <button class="return-button" id="shader-return-main-menu" type="button">
             Return to main menu
@@ -517,161 +627,386 @@
               <h2 id="shader-mode-title">Design your shader</h2>
             </div>
             <div class="shader-toolbar-actions">
-              <button class="secondary-button" id="shader-save-file" type="button">
-                Save
-              </button>
+              <div class="shader-version-field">
+                <span>Iris · MC</span>
+                <div class="shader-version-dropdown" id="shader-version-dropdown" aria-label="Target Minecraft version"></div>
+              </div>
+              <span class="shader-autosave-status" id="shader-autosave-status" title="Changes save automatically">Saved</span>
               <button class="create-button" id="shader-export-pack" type="button">
                 Export shader pack
               </button>
             </div>
           </header>
-          <p class="workspace-status shader-status" id="shader-status" role="status">
-            Ready.
-          </p>
-
-          <div class="shader-mode-stage" id="shader-mode-stage">
-            <!-- Visual builder -->
-            <div class="shader-mode-panel is-active" id="shader-panel-visual" data-shader-panel="visual">
+          <div class="shader-workbench">
+            <div class="shader-mode-stage" id="shader-mode-stage">
+              <!-- Visual builder -->
+              <div class="shader-mode-panel is-active" id="shader-panel-visual" data-shader-panel="visual">
               <div class="shader-visual-scroll">
-                <p class="shader-visual-lead">
-                  Tune the look with no code. Every change is written straight into your shader
-                  files — open <strong>Code editor</strong> any time to see the GLSL it produced.
-                </p>
-
-                <section class="visual-group">
+                <div class="shader-category-browser" id="shader-category-browser">
+                  <section class="visual-group shader-category-group">
                   <header class="visual-group-head">
-                    <h3>Tone &amp; exposure</h3>
-                    <p>Overall brightness and punch of the final image.</p>
+                    <h3>World &amp; atmosphere</h3>
                   </header>
-                  <div class="visual-control" data-control="exposure">
-                    <div class="visual-control-top">
-                      <label for="visual-exposure">Exposure</label>
-                      <output class="visual-value" id="visual-exposure-value">1.00</output>
-                    </div>
-                    <input id="visual-exposure" type="range" min="0.6" max="1.6" step="0.01" value="1" />
-                    <small>How much light the scene gathers before tone-mapping.</small>
-                  </div>
-                  <div class="visual-control" data-control="contrast">
-                    <div class="visual-control-top">
-                      <label for="visual-contrast">Contrast</label>
-                      <output class="visual-value" id="visual-contrast-value">1.00</output>
-                    </div>
-                    <input id="visual-contrast" type="range" min="0.6" max="1.6" step="0.01" value="1" />
-                    <small>Separation between the darkest and brightest pixels.</small>
-                  </div>
-                  <div class="visual-control" data-control="saturation">
-                    <div class="visual-control-top">
-                      <label for="visual-saturation">Saturation</label>
-                      <output class="visual-value" id="visual-saturation-value">1.00</output>
-                    </div>
-                    <input id="visual-saturation" type="range" min="0" max="2" step="0.01" value="1" />
-                    <small>Color intensity, from grayscale to vivid.</small>
+                  <div class="shader-category-grid">
+                    <button class="shader-category-button" type="button" data-shader-category="sky" aria-label="Open Sky category">
+                      <span class="shader-category-icon shader-category-icon--sky" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Sky</strong>
+                        <small>Horizon, zenith, gradients</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="clouds" aria-label="Open Clouds category">
+                      <span class="shader-category-icon shader-category-icon--clouds" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Clouds</strong>
+                        <small>2D, volumetric, coverage</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="fog" aria-label="Open Fog category">
+                      <span class="shader-category-icon shader-category-icon--fog" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Fog</strong>
+                        <small>Distance, height, biome tint</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="weather" aria-label="Open Weather category">
+                      <span class="shader-category-icon shader-category-icon--weather" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Weather</strong>
+                        <small>Rain, snow, wet air</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="time-of-day" aria-label="Open Time of day category">
+                      <span class="shader-category-icon shader-category-icon--time" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Time of day</strong>
+                        <small>Dawn, noon, dusk, night</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="dimensions" aria-label="Open Dimensions category">
+                      <span class="shader-category-icon shader-category-icon--dimensions" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Dimensions</strong>
+                        <small>Overworld, Nether, End</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="stars" aria-label="Open Stars category">
+                      <span class="shader-category-icon shader-category-icon--stars" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Stars</strong>
+                        <small>Night sky, moon, galaxies</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="aurora" aria-label="Open Aurora category">
+                      <span class="shader-category-icon shader-category-icon--aurora" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Aurora</strong>
+                        <small>Polar bands, shimmer, color</small>
+                      </span>
+                    </button>
                   </div>
                 </section>
 
-                <section class="visual-group">
+                <section class="visual-group shader-category-group">
                   <header class="visual-group-head">
-                    <h3>Atmosphere</h3>
-                    <p>Distance haze and the glow that bleeds from bright surfaces.</p>
+                    <h3>Light &amp; shadow</h3>
                   </header>
-                  <div class="visual-control" data-control="fog">
-                    <div class="visual-control-top">
-                      <label for="visual-fog">Fog density</label>
-                      <output class="visual-value" id="visual-fog-value">0.35</output>
-                    </div>
-                    <input id="visual-fog" type="range" min="0" max="1" step="0.01" value="0.35" />
-                    <small>Thickness of the atmospheric haze in the distance.</small>
-                  </div>
-                  <div class="visual-control" data-control="bloom">
-                    <div class="visual-control-top">
-                      <label for="visual-bloom">Bloom strength</label>
-                      <output class="visual-value" id="visual-bloom-value">0.40</output>
-                    </div>
-                    <input id="visual-bloom" type="range" min="0" max="1" step="0.01" value="0.4" />
-                    <small>Soft glow that spreads from emissive blocks and the sky.</small>
-                  </div>
-                </section>
-
-                <section class="visual-group">
-                  <header class="visual-group-head">
-                    <h3>Color grade</h3>
-                    <p>Tint the lighting and atmosphere to set a mood.</p>
-                  </header>
-                  <div class="visual-swatch-row">
-                    <label class="visual-swatch" for="visual-light-color">
-                      <input id="visual-light-color" type="color" value="#ffe9c4" />
-                      <span class="visual-swatch-chip" id="visual-light-color-chip"></span>
-                      <span class="visual-swatch-copy">
+                  <div class="shader-category-grid">
+                    <button class="shader-category-button" type="button" data-shader-category="sunlight" aria-label="Open Sunlight category">
+                      <span class="shader-category-icon shader-category-icon--sun" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
                         <strong>Sunlight</strong>
-                        <small id="visual-light-color-hex">#ffe9c4</small>
+                        <small>Angle, warmth, intensity</small>
                       </span>
-                    </label>
-                    <label class="visual-swatch" for="visual-sky-color">
-                      <input id="visual-sky-color" type="color" value="#8fc7ff" />
-                      <span class="visual-swatch-chip" id="visual-sky-color-chip"></span>
-                      <span class="visual-swatch-copy">
-                        <strong>Sky tint</strong>
-                        <small id="visual-sky-color-hex">#8fc7ff</small>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="moonlight" aria-label="Open Moonlight category">
+                      <span class="shader-category-icon shader-category-icon--moon" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Moonlight</strong>
+                        <small>Cool tint, night exposure</small>
                       </span>
-                    </label>
-                    <label class="visual-swatch" for="visual-water-color">
-                      <input id="visual-water-color" type="color" value="#2f6f8f" />
-                      <span class="visual-swatch-chip" id="visual-water-color-chip"></span>
-                      <span class="visual-swatch-copy">
-                        <strong>Water</strong>
-                        <small id="visual-water-color-hex">#2f6f8f</small>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="block-light" aria-label="Open Block light category">
+                      <span class="shader-category-icon shader-category-icon--block-light" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Block light</strong>
+                        <small>Torches, lava, lanterns</small>
                       </span>
-                    </label>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="shadows" aria-label="Open Shadows category">
+                      <span class="shader-category-icon shader-category-icon--shadow" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Shadows</strong>
+                        <small>Maps, softness, distance</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="ambient-occlusion" aria-label="Open Ambient occlusion category">
+                      <span class="shader-category-icon shader-category-icon--ao" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Ambient occlusion</strong>
+                        <small>Contact shade, creases</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="global-illumination" aria-label="Open Global illumination category">
+                      <span class="shader-category-icon shader-category-icon--gi" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Global illumination</strong>
+                        <small>Bounces, caves, interiors</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="emissive-light" aria-label="Open Emissive light category">
+                      <span class="shader-category-icon shader-category-icon--emissive" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Emissive light</strong>
+                        <small>Ores, eyes, signs, mobs</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="bloom" aria-label="Open Bloom category">
+                      <span class="shader-category-icon shader-category-icon--bloom" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Bloom</strong>
+                        <small>Glow, threshold, spread</small>
+                      </span>
+                    </button>
                   </div>
                 </section>
 
-                <section class="visual-group">
+                <section class="visual-group shader-category-group">
                   <header class="visual-group-head">
-                    <h3>Effects</h3>
-                    <p>Toggle the extra passes Anvil adds to your pack.</p>
+                    <h3>Materials &amp; surfaces</h3>
                   </header>
-                  <div class="visual-toggle-grid">
-                    <label class="visual-toggle">
-                      <input id="visual-toggle-bloom" type="checkbox" checked />
-                      <span class="visual-toggle-box" aria-hidden="true"></span>
-                      <span class="visual-toggle-copy">
-                        <strong>Bloom pass</strong>
-                        <small>Glow around bright pixels.</small>
+                  <div class="shader-category-grid">
+                    <button class="shader-category-button" type="button" data-shader-category="water" aria-label="Open Water category">
+                      <span class="shader-category-icon shader-category-icon--water" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Water</strong>
+                        <small>Waves, color, transparency</small>
                       </span>
-                    </label>
-                    <label class="visual-toggle">
-                      <input id="visual-toggle-foliage" type="checkbox" checked />
-                      <span class="visual-toggle-box" aria-hidden="true"></span>
-                      <span class="visual-toggle-copy">
-                        <strong>Waving foliage</strong>
-                        <small>Animate grass and leaves.</small>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="reflections" aria-label="Open Reflections category">
+                      <span class="shader-category-icon shader-category-icon--reflection" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Reflections</strong>
+                        <small>Screen space, sky, blocks</small>
                       </span>
-                    </label>
-                    <label class="visual-toggle">
-                      <input id="visual-toggle-water" type="checkbox" checked />
-                      <span class="visual-toggle-box" aria-hidden="true"></span>
-                      <span class="visual-toggle-copy">
-                        <strong>Water ripples</strong>
-                        <small>Animated normal-mapped water.</small>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="refraction" aria-label="Open Refraction category">
+                      <span class="shader-category-icon shader-category-icon--refraction" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Refraction</strong>
+                        <small>Glass, water, ice</small>
                       </span>
-                    </label>
-                    <label class="visual-toggle">
-                      <input id="visual-toggle-vignette" type="checkbox" />
-                      <span class="visual-toggle-box" aria-hidden="true"></span>
-                      <span class="visual-toggle-copy">
-                        <strong>Vignette</strong>
-                        <small>Darken the screen edges.</small>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="pbr" aria-label="Open PBR category">
+                      <span class="shader-category-icon shader-category-icon--pbr" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>PBR</strong>
+                        <small>Normal, roughness, metal</small>
                       </span>
-                    </label>
-                    <label class="visual-toggle">
-                      <input id="visual-toggle-sharpen" type="checkbox" />
-                      <span class="visual-toggle-box" aria-hidden="true"></span>
-                      <span class="visual-toggle-copy">
-                        <strong>Sharpen</strong>
-                        <small>Crisp edges on textures.</small>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="parallax" aria-label="Open Surface relief category">
+                      <span class="shader-category-icon shader-category-icon--parallax" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Surface relief</strong>
+                        <small>Depth, relief, emboss</small>
                       </span>
-                    </label>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="wetness" aria-label="Open Wetness category">
+                      <span class="shader-category-icon shader-category-icon--wetness" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Wetness</strong>
+                        <small>Rain sheen, puddles, mud</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="terrain" aria-label="Open Terrain category">
+                      <span class="shader-category-icon shader-category-icon--terrain" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Terrain</strong>
+                        <small>Blocks, caves, cliffs</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="translucency" aria-label="Open Translucency category">
+                      <span class="shader-category-icon shader-category-icon--translucency" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Translucency</strong>
+                        <small>Leaves, glass, ice, portals</small>
+                      </span>
+                    </button>
                   </div>
+                </section>
+
+                <section class="visual-group shader-category-group">
+                  <header class="visual-group-head">
+                    <h3>Nature &amp; animation</h3>
+                  </header>
+                  <div class="shader-category-grid">
+                    <button class="shader-category-button" type="button" data-shader-category="foliage" aria-label="Open Foliage category">
+                      <span class="shader-category-icon shader-category-icon--foliage" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Foliage</strong>
+                        <small>Leaves, grass, crops</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="wind" aria-label="Open Wind category">
+                      <span class="shader-category-icon shader-category-icon--wind" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Wind</strong>
+                        <small>Sway, gusts, direction</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="lava" aria-label="Open Lava category">
+                      <span class="shader-category-icon shader-category-icon--lava" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Lava</strong>
+                        <small>Heat, flow, glow</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="particles" aria-label="Open Particles category">
+                      <span class="shader-category-icon shader-category-icon--particles" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Particles</strong>
+                        <small>Sparks, smoke, rain splash</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="entities" aria-label="Open Entities category">
+                      <span class="shader-category-icon shader-category-icon--entities" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Entities</strong>
+                        <small>Mobs, players, armor</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="handheld" aria-label="Open Handheld category">
+                      <span class="shader-category-icon shader-category-icon--handheld" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Handheld</strong>
+                        <small>Items, first-person, glow</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="portals" aria-label="Open Portals category">
+                      <span class="shader-category-icon shader-category-icon--portal" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Portals</strong>
+                        <small>Nether, End, shimmer</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="biomes" aria-label="Open Biomes category">
+                      <span class="shader-category-icon shader-category-icon--biomes" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Biomes</strong>
+                        <small>Tint, humidity, mood</small>
+                      </span>
+                    </button>
+                  </div>
+                </section>
+
+                <section class="visual-group shader-category-group">
+                  <header class="visual-group-head">
+                    <h3>Post process &amp; camera</h3>
+                  </header>
+                  <div class="shader-category-grid">
+                    <button class="shader-category-button" type="button" data-shader-category="color-grade" aria-label="Open Color grade category">
+                      <span class="shader-category-icon shader-category-icon--grade" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Color grade</strong>
+                        <small>Tone, palette, mood</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="exposure" aria-label="Open Exposure category">
+                      <span class="shader-category-icon shader-category-icon--exposure" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Exposure</strong>
+                        <small>Brightness, eye adaptation</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="contrast" aria-label="Open Contrast category">
+                      <span class="shader-category-icon shader-category-icon--contrast" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Contrast</strong>
+                        <small>Blacks, whites, midtones</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="depth-of-field" aria-label="Open Depth of field category">
+                      <span class="shader-category-icon shader-category-icon--dof" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Depth of field</strong>
+                        <small>Focus, blur, aperture</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="motion-blur" aria-label="Open Motion blur category">
+                      <span class="shader-category-icon shader-category-icon--motion" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Motion blur</strong>
+                        <small>Camera, entities, speed</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="lens-effects" aria-label="Open Lens effects category">
+                      <span class="shader-category-icon shader-category-icon--lens" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Lens effects</strong>
+                        <small>Flare, glare, dirt, streaks</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="sharpening" aria-label="Open Sharpening category">
+                      <span class="shader-category-icon shader-category-icon--sharpen" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Sharpening</strong>
+                        <small>Texture clarity, edge detail</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="screen-effects" aria-label="Open Screen effects category">
+                      <span class="shader-category-icon shader-category-icon--screen" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Screen effects</strong>
+                        <small>Underwater, night, caves</small>
+                      </span>
+                    </button>
+                  </div>
+                </section>
+
+                <section class="visual-group shader-category-group">
+                  <header class="visual-group-head">
+                    <h3>Profiles &amp; tuning</h3>
+                  </header>
+                  <div class="shader-category-grid">
+                    <button class="shader-category-button" type="button" data-shader-category="quality-presets" aria-label="Open Quality presets category">
+                      <span class="shader-category-icon shader-category-icon--quality" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Quality presets</strong>
+                        <small>Samples, distance, detail</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="performance" aria-label="Open Performance category">
+                      <span class="shader-category-icon shader-category-icon--performance" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Performance</strong>
+                        <small>Fast paths, frame rate</small>
+                      </span>
+                    </button>
+                    <button class="shader-category-button" type="button" data-shader-category="debug" aria-label="Open Debug category">
+                      <span class="shader-category-icon shader-category-icon--debug" aria-hidden="true"></span>
+                      <span class="shader-category-copy">
+                        <strong>Debug</strong>
+                        <small>Buffers, normals, light maps</small>
+                      </span>
+                    </button>
+                  </div>
+                  </section>
+                </div>
+
+                <section class="shader-category-editor" id="shader-category-editor" hidden>
+                  <header class="shader-category-editor-head">
+                    <div class="shader-category-editor-title">
+                      <p class="section-kicker" id="shader-category-kicker">Shader category</p>
+                      <h3 id="shader-category-title">Category</h3>
+                      <p id="shader-category-summary"></p>
+                    </div>
+                    <div class="shader-category-editor-actions">
+                      <button class="secondary-button" id="shader-category-back" type="button">
+                        Back to dashboard
+                      </button>
+                    </div>
+                  </header>
+                  <div class="shader-category-editor-body" id="shader-category-editor-body"></div>
                 </section>
               </div>
             </div>
@@ -709,76 +1044,140 @@
                 <!-- Editor tab -->
                 <div class="code-view" data-code-view="editor">
                   <div class="code-editor-bar">
-                    <button class="code-editor-back" id="code-editor-back" type="button">
-                      <span aria-hidden="true">←</span> Explorer
+                    <button class="code-editor-discard" id="code-editor-discard" type="button">
+                      Discard changes
+                    </button>
+                    <button class="code-editor-savechanges" id="code-editor-savechanges" type="button">
+                      Save changes
                     </button>
                     <span class="code-editor-path" id="code-editor-path">No file open</span>
-                    <span class="code-editor-dirty" id="code-editor-dirty" hidden>● Unsaved</span>
+                    <span class="code-editor-spacer" aria-hidden="true"></span>
+                    <span class="code-editor-lang" id="code-editor-lang" hidden>GLSL</span>
                   </div>
                   <div class="code-editor-surface">
                     <div class="code-editor-empty" id="code-editor-empty">
                       <span class="code-editor-empty-mark" aria-hidden="true"></span>
                       <p>Open a file from the Explorer to start editing.</p>
                     </div>
-                    <textarea
-                      id="shader-code"
-                      class="code-editor-textarea"
-                      spellcheck="false"
-                      autocomplete="off"
-                      autocorrect="off"
-                      autocapitalize="off"
-                      aria-label="Shader source code"
-                      hidden
-                    ></textarea>
+                    <div class="code-editor-stack" id="code-editor-stack" hidden>
+                      <div class="code-editor-gutter" id="code-editor-gutter" aria-hidden="true"></div>
+                      <div class="code-editor-pane">
+                        <pre class="code-editor-highlight" id="code-editor-highlight" aria-hidden="true"><code id="code-editor-highlight-code"></code></pre>
+                        <textarea
+                          id="shader-code"
+                          class="code-editor-textarea"
+                          spellcheck="false"
+                          autocomplete="off"
+                          autocorrect="off"
+                          autocapitalize="off"
+                          wrap="off"
+                          aria-label="Shader source code"
+                        ></textarea>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- AI assistant -->
-            <div class="shader-mode-panel" id="shader-panel-ai" data-shader-panel="ai">
-              <div class="ai-thread" id="ai-thread" aria-live="polite">
-                <div class="ai-message ai-message--assistant">
-                  <span class="ai-avatar" aria-hidden="true"></span>
-                  <div class="ai-bubble">
-                    <p>
-                      Hey! I'm your shader assistant. Tell me the vibe you're after — “warm
-                      cinematic sunset”, “moody dark nether”, “crisp vibrant survival” — and I'll
-                      wire up the GLSL for you.
-                    </p>
-                  </div>
-                </div>
-              </div>
+            </div>
 
-              <div class="ai-suggestions" id="ai-suggestions" aria-label="Prompt ideas">
-                <button class="ai-chip" type="button" data-ai-prompt="Make it a warm cinematic sunset with soft bloom">
-                  Warm cinematic sunset
-                </button>
-                <button class="ai-chip" type="button" data-ai-prompt="Give me a moody, foggy nether look">
-                  Moody foggy nether
-                </button>
-                <button class="ai-chip" type="button" data-ai-prompt="Crisp, vibrant colors for survival worlds">
-                  Crisp &amp; vibrant
-                </button>
-              </div>
-
+            <aside class="shader-ai-split" id="shader-ai-split" aria-label="AI assistant">
+              <button class="ai-panel-toggle" id="shader-ai-toggle" type="button" aria-label="Collapse AI" aria-expanded="true">
+                <span class="ai-toggle-icon" aria-hidden="true"></span>
+              </button>
+              <button class="ai-settings-button" id="shader-ai-settings" type="button" aria-label="AI settings">
+                <span class="ai-settings-icon" aria-hidden="true"></span>
+              </button>
+              <button class="ai-new-conversation" id="ai-new-conversation" type="button" aria-label="New conversation">
+                <span class="ai-new-icon" aria-hidden="true"></span>
+              </button>
+              <span class="ai-center-icon" aria-hidden="true"></span>
+              <div class="ai-thread" id="ai-thread" aria-live="polite"></div>
               <form class="ai-composer" id="ai-composer">
-                <textarea
-                  id="ai-input"
-                  class="ai-input"
-                  rows="1"
-                  placeholder="Describe the look you want…"
-                  spellcheck="false"
-                  aria-label="Describe the shader you want"
-                ></textarea>
-                <button class="ai-send" id="ai-send" type="submit" aria-label="Send to assistant">
-                  <span aria-hidden="true">↑</span>
-                </button>
+                <div class="ai-composer-meta">
+                  <span class="ai-context-status" id="ai-context-status">No tokens used yet</span>
+                </div>
+                <div class="ai-pending-attachments" id="ai-pending-attachments" hidden></div>
+                <div class="ai-input-row">
+                  <button class="ai-plus" id="ai-plus" type="button" aria-label="Add context">
+                    <span aria-hidden="true">+</span>
+                  </button>
+                  <textarea
+                    id="ai-input"
+                    class="ai-input"
+                    rows="1"
+                    placeholder="Ask AI"
+                    spellcheck="false"
+                    aria-label="Ask AI"
+                  ></textarea>
+                  <button class="ai-send" id="ai-send" type="submit" aria-label="Send to assistant">
+                    <span aria-hidden="true">↑</span>
+                  </button>
+                </div>
+                <input class="ai-file-input" id="ai-image-input" type="file" accept="image/*" multiple hidden />
               </form>
-            </div>
+            </aside>
           </div>
         </section>
       </section>
+
+        <div class="ai-setup-backdrop" id="resource-ai-setup-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="resource-ai-setup-title">
+          <section class="ai-setup-modal">
+            <header class="ai-setup-header">
+              <div>
+                <p>AI assistant</p>
+                <h2 id="resource-ai-setup-title">Set the AI up.</h2>
+              </div>
+              <button class="ai-setup-close" id="resource-ai-setup-close" type="button" aria-label="Close AI setup">
+                <span aria-hidden="true">×</span>
+              </button>
+            </header>
+            <div class="ai-provider-grid" aria-label="AI providers">
+              <button class="ai-provider-card" type="button" data-ai-provider="ollama">
+                <span class="ai-provider-badge ai-provider-badge--local" aria-hidden="true">LOCAL</span>
+                <strong>Use a local model</strong>
+                <small>Ollama on this computer.</small>
+              </button>
+              <button class="ai-provider-card" type="button" data-ai-provider="openrouter">
+                <span class="ai-provider-badge ai-provider-badge--api" aria-hidden="true">API</span>
+                <strong>Use OpenRouter API</strong>
+                <small>Any OpenRouter chat model.</small>
+              </button>
+              <button class="ai-provider-card" type="button" data-ai-provider="gemini">
+                <span class="ai-provider-badge ai-provider-badge--api" aria-hidden="true">API</span>
+                <strong>Use AI Studio API</strong>
+                <small>Google Gemini models.</small>
+              </button>
+            </div>
+            <form class="ai-setup-form" id="resource-ai-setup-form" hidden>
+              <div class="ai-setup-form-title">
+                <span class="ai-provider-badge ai-provider-badge--local" id="resource-ai-setup-provider-icon" aria-hidden="true">LOCAL</span>
+                <strong id="resource-ai-setup-provider-title">Local model</strong>
+              </div>
+              <label class="ai-setup-field" id="resource-ai-base-url-field">
+                <span>Base URL</span>
+                <input id="resource-ai-base-url" type="text" autocomplete="off" spellcheck="false" />
+              </label>
+              <label class="ai-setup-field" id="resource-ai-api-key-field">
+                <span>API key</span>
+                <input id="resource-ai-api-key" type="password" autocomplete="off" spellcheck="false" />
+              </label>
+              <div class="ai-setup-field">
+                <span class="ai-setup-field-head">
+                  Model
+                  <span class="ai-setup-field-hint">Pick a preset or type your own</span>
+                </span>
+                <div class="ai-model-presets" id="resource-ai-model-presets" role="group" aria-label="Suggested models"></div>
+                <input id="resource-ai-model" type="text" autocomplete="off" spellcheck="false" placeholder="Model name" />
+              </div>
+              <div class="ai-setup-actions">
+                <button class="secondary-button" id="resource-ai-cancel-setup" type="button">Cancel</button>
+                <button class="create-button" id="resource-ai-save-setup" type="submit">Use this AI</button>
+              </div>
+            </form>
+          </section>
+        </div>
 
       <div class="modal-backdrop" id="project-modal" aria-hidden="true">
         <section
@@ -788,15 +1187,15 @@
           aria-labelledby="project-modal-title"
         >
           <aside class="project-types" aria-label="Project type">
-            <button class="project-type" type="button" data-project-type="shader" disabled>
+            <button class="project-type" type="button" data-project-type="shader">
               <span class="type-icon type-icon--shaders">S</span>
               <span>Shader Pack</span>
             </button>
             <button class="project-type project-type--active" type="button" data-project-type="texture">
-              <span class="type-icon type-icon--texture">TP</span>
-              <span>Texture Pack</span>
+              <span class="type-icon type-icon--texture">RP</span>
+              <span>Resource Pack</span>
             </button>
-            <p class="type-status">Available now</p>
+            <p class="type-status">Resource and shader packs available now</p>
             <button class="project-type" type="button" disabled>
               <span class="type-icon type-icon--mods">M</span>
               <span>Mods</span>
@@ -811,7 +1210,7 @@
             <div class="form-topline">
               <div>
                 <p class="section-kicker">New Project</p>
-                <h2 id="project-modal-title">Shader pack</h2>
+                <h2 id="project-modal-title">Resource pack</h2>
               </div>
               <button class="icon-button" id="modal-x" type="button" aria-label="Close">
                 <span></span>
@@ -820,14 +1219,14 @@
 
             <div class="identity-row">
               <label class="name-field">
-                <span id="pack-name-label">Shader pack name</span>
+                <span id="pack-name-label">Resource pack name</span>
                 <input
                   id="pack-name"
                   name="name"
                   type="text"
                   maxlength="32"
                   required
-                  placeholder="Aurora Shade"
+                  placeholder="Nightfall Tweaks"
                   autocomplete="off"
                 />
                 <small><span id="pack-name-count">0</span>/32</small>
@@ -899,7 +1298,7 @@
                 role="textbox"
                 aria-multiline="true"
                 contenteditable="true"
-                data-placeholder="Soft lighting, colored skies, and water tweaks."
+                data-placeholder="A clean resource pack for survival worlds."
               ></div>
               <small class="description-count">
                 <span id="description-count">0</span>/160
@@ -915,6 +1314,104 @@
         </section>
       </div>
 
+      <div class="modal-backdrop" id="policies-modal" aria-hidden="true">
+        <section
+          class="policies-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="policies-title"
+        >
+          <div class="form-topline">
+            <div>
+              <p class="section-kicker">About Anvil</p>
+              <h2 id="policies-title">Privacy policy</h2>
+            </div>
+            <button class="icon-button" id="close-policies" type="button" aria-label="Close">
+              <span></span>
+            </button>
+          </div>
+          <div class="policies-body">
+            <h3>Your data stays on your computer</h3>
+            <p>
+              Anvil stores your projects, textures, and shader files locally on this computer.
+              Anvil has no account system, no analytics, and no telemetry — we never collect,
+              sell, or upload your data. There are no hidden background uploads: the only
+              network requests Anvil makes are the ones listed below.
+            </p>
+            <h3>Where your data lives</h3>
+            <p>
+              Everything is kept in Anvil's application data folder: your project list, saved
+              textures, exported packs' source data, shader files, and the AI provider settings.
+              On Linux that is <code>~/.local/share/com.anvil.app</code>; on Windows it is
+              <code>%APPDATA%</code> and on macOS <code>~/Library/Application Support</code>,
+              under the same identifier. Deleting a project from Anvil's dashboard removes its
+              files from that folder.
+            </p>
+            <h3>AI features</h3>
+            <p>
+              The AI assistant is optional and off until you configure a provider yourself
+              (Ollama, OpenRouter, or Google AI Studio). When you send a message, your prompt,
+              the relevant project data (such as shader options or texture pixels), recent
+              conversation turns, and any images you attach are sent to that provider using
+              your own API key. Nothing is sent anywhere when you don't use the assistant.
+            </p>
+            <p>
+              Your API key and model choice are stored locally in the app's storage — note
+              that the key is stored unencrypted, so treat Anvil's data folder like any other
+              folder containing secrets and prefer scoped, revocable keys. The key is never
+              sent anywhere except to the provider it belongs to, as part of authenticating
+              your own requests. The provider's own privacy policy and terms apply to
+              everything you send through it. If you use a local model via Ollama, your AI
+              requests never leave your machine at all.
+            </p>
+            <h3>Network access</h3>
+            <p>
+              At startup Anvil contacts GitHub to check for app updates
+              (release metadata only) and to show the contributors list on the home screen.
+              When you first open a resource pack project, Anvil downloads vanilla Minecraft
+              textures from Mojang's public asset servers so you have something to edit.
+              No personal data, identifiers, or usage information is sent with any of these
+              requests.
+            </p>
+            <h3>Your choices</h3>
+            <p>
+              You can use Anvil fully offline — projects, the texture editor, and the shader
+              builder work without a connection (the contributors list and update check will
+              simply fail quietly). You can clear the AI configuration at any time from the AI
+              setup dialog, and remove all of Anvil's data by deleting the application data
+              folder listed above.
+            </p>
+            <h3>Updates</h3>
+            <p>
+              Anvil updates itself from signed GitHub releases. An update check downloads only
+              release metadata; an actual update downloads the new app package and verifies its
+              signature before installing.
+            </p>
+            <h3>Changes to this policy</h3>
+            <p>
+              If a future version of Anvil changes what data is stored or sent, this section
+              will be updated in the same release. Because Anvil is open source, every change
+              is publicly visible in the repository history.
+            </p>
+            <h3>Licensing</h3>
+            <p>
+              Anvil is MIT-licensed and open source. It is not affiliated with Mojang or
+              Microsoft — Minecraft and its textures are © Mojang Studios. Questions or
+              concerns are welcome on the GitHub issue tracker.
+            </p>
+            <h3>Full policies</h3>
+            <p>
+              The complete, versioned policy documents live in the repository:
+              the <a href="https://github.com/NssIs/Anvil/blob/main/PRIVACY.md" class="policies-link">privacy policy</a>,
+              the <a href="https://github.com/NssIs/Anvil/blob/main/SECURITY.md" class="policies-link">security policy</a>
+              (including how to report vulnerabilities privately), and the
+              <a href="https://github.com/NssIs/Anvil/blob/main/ASSET_POLICY.md" class="policies-link">asset, content &amp; trademark policy</a>
+              covering Minecraft assets and packs you share.
+            </p>
+          </div>
+        </section>
+      </div>
+
       <div class="modal-backdrop" id="delete-modal" aria-hidden="true">
         <section
           class="delete-modal"
@@ -926,7 +1423,7 @@
           <div class="form-topline">
             <div>
               <p class="section-kicker delete-kicker">Delete project</p>
-              <h2 id="delete-modal-title">Delete texture pack</h2>
+              <h2 id="delete-modal-title">Delete resource pack</h2>
             </div>
             <button class="icon-button" id="close-delete" type="button" aria-label="Close">
               <span></span>
@@ -936,7 +1433,7 @@
             <strong>This will remove the folder and all of its files.</strong>
           </p>
           <p class="delete-body" id="delete-body">
-            Deleting this texture pack erases its saved textures and project data from this
+            Deleting this resource pack erases its saved textures and project data from this
             computer. This action cannot be undone.
           </p>
           <div class="modal-actions">
@@ -963,13 +1460,13 @@
           <div class="library-header">
             <div class="library-heading">
               <p class="section-kicker">Projects</p>
-              <h2 id="project-library-title">All texture packs</h2>
+              <h2 id="project-library-title">All projects</h2>
             </div>
             <label class="library-search">
               <input
                 id="library-search"
                 type="search"
-                placeholder="Search texture packs…"
+                placeholder="Search projects..."
                 autocomplete="off"
               />
             </label>
