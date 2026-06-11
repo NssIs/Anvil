@@ -1,12 +1,12 @@
 # Anvil
 
-Anvil is a desktop toolkit for Minecraft creators, built with [Tauri](https://tauri.app/)
-(Rust) and a vanilla TypeScript front-end. Its first available workspace is a
-fast resource-pack editor: create a pack, pull the vanilla textures for a chosen
-Minecraft version, paint over the ones you want to change with a layered pixel
-editor, and export a ready-to-use resource pack — only the textures you actually
-edited are included in the export. Mod, shader, and plugin tooling are planned
-next steps.
+Anvil is an all-in-one development platform for Minecraft, built with
+[Tauri](https://tauri.app/) (Rust) and a vanilla TypeScript front-end. It ships
+two workspaces today: a **resource-pack editor** — pull vanilla textures for any
+version, paint with a layered pixel editor (or let the optional AI assistant
+paint for you), and export a clean pack — and a **shader-pack workspace** that
+designs full Iris shader packs for 1.21.x visually, with a GLSL code editor and
+its own AI assistant. Mod and plugin tooling are planned next.
 
 ## Download
 

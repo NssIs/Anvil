@@ -2,7 +2,7 @@
   "name": "anvil",
   "private": true,
   "version": "0.1.3",
-  "description": "Desktop toolkit for Minecraft creators, starting with resource-pack editing.",
+  "description": "All-in-one development platform for Minecraft.",
   "license": "MIT",
   "repository": {
     "type": "git",

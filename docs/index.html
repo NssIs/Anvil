@@ -3,17 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Anvil — Minecraft creator toolkit</title>
+    <title>Anvil — All-in-one development platform for Minecraft</title>
     <meta
       name="description"
-      content="Anvil is a desktop toolkit for Minecraft creators. Texture-pack editing is available today, with mod, shader, and plugin tools on the roadmap."
+      content="Anvil is an all-in-one development platform for Minecraft. Build resource packs with a layered pixel editor and design full Iris shader packs visually — with optional AI assistants in both workspaces."
     />
     <link rel="icon" href="icon.png" />
     <link rel="stylesheet" href="styles.css" />
-    <meta property="og:title" content="Anvil — Minecraft creator toolkit" />
+    <meta property="og:title" content="Anvil — All-in-one development platform for Minecraft" />
     <meta
       property="og:description"
-      content="Start with a fast resource-pack editor: pull vanilla textures, paint with layers, recolor in one stroke, and export a resource pack."
+      content="Resource packs and Iris shader packs in one app: layered pixel editing, a visual shader builder with GLSL code editor, and AI assistants that edit alongside you."
     />
     <meta property="og:image" content="icon.png" />
   </head>
@@ -32,13 +32,14 @@
 
     <main id="top">
       <section class="hero">
-        <p class="kicker">Minecraft creator tools, starting with resource packs</p>
+        <p class="kicker">All-in-one development platform for Minecraft</p>
         <h1>Anvil</h1>
         <p class="lead">
-          A desktop toolkit for Minecraft creators. Today, Anvil gives you a fast
-          resource-pack editor: pull the vanilla textures for any version, paint over them
-          with a layered pixel editor, recolor a whole texture in one stroke, and export
-          a ready-to-use resource pack.
+          Build resource packs and shader packs in one app. Paint textures with a
+          layered pixel editor, design a complete Iris shader pack visually — sky,
+          shadows, water, bloom and hundreds more options — then drop into the GLSL
+          code editor when you want full control. Optional AI assistants in both
+          workspaces answer questions and make edits right on your canvas.
         </p>
         <div class="hero-actions">
           <a class="btn btn-primary" id="primary-download" href="https://github.com/NssIs/Anvil/releases" target="_blank" rel="noopener">
@@ -51,26 +52,42 @@
         <div class="shot shot-gallery" aria-label="Anvil screenshots">
           <img
             class="shot-main"
-            src="screenshot-assets.png"
-            alt="Anvil texture asset workspace"
-            width="1872"
-            height="969"
+            src="shot-shader-builder.png"
+            alt="Anvil shader visual builder with grouped option categories"
+            width="1875"
+            height="972"
             decoding="async"
           />
           <div class="shot-secondary">
             <img
-              src="screenshot-new-project.png"
-              alt="Anvil new resource pack project dialog"
+              src="shot-pixel-ai.png"
+              alt="Anvil pixel editor with the AI assistant recoloring a texture as a new layer"
+              width="1875"
+              height="976"
+              loading="lazy"
+              decoding="async"
+            />
+            <img
+              src="shot-shader-code-ai.png"
+              alt="Anvil shader code editor with file explorer and AI assistant"
               width="1882"
               height="964"
               loading="lazy"
               decoding="async"
             />
             <img
-              src="screenshot-pixel-editor.png"
-              alt="Anvil pixel editor with layers and color controls"
+              src="shot-pixel-editor.png"
+              alt="Anvil pixel editor with layers, tools, and color picker"
+              width="1869"
+              height="970"
+              loading="lazy"
+              decoding="async"
+            />
+            <img
+              src="shot-new-project.png"
+              alt="Anvil new project dialog for shader and resource packs"
               width="1870"
-              height="966"
+              height="957"
               loading="lazy"
               decoding="async"
             />
@@ -144,12 +161,13 @@ npm run tauri build    # build installers for your OS</code></pre>
       <section class="features">
         <h2>What's inside</h2>
         <ul class="feature-list">
-          <li><strong>Resource packs available today</strong> — mods, shaders and plugins are on the roadmap while the current release focuses on resource-pack editing.</li>
-          <li><strong>Layered pixel editor</strong> — create, reorder and toggle layers, with a hover target outline and adjustable brush size.</li>
-          <li><strong>One-stroke recolor</strong> — repaint a texture in any color while keeping its shading. Turn a diamond into a ruby in seconds.</li>
+          <li><strong>Resource packs &amp; shader packs available now</strong> — mods and plugins are next on the roadmap.</li>
+          <li><strong>Visual shader builder</strong> — design a complete Iris shader pack for Minecraft 1.21.x: sky, clouds, fog, shadows, ambient occlusion, water, bloom, depth of field and hundreds more options, exported ready to play.</li>
+          <li><strong>GLSL code editor</strong> — syntax-highlighted shader files with an explorer, drag-and-drop organizing, and automatic saving; files you hand-edit are never overwritten by the builder.</li>
+          <li><strong>AI assistants, your keys</strong> — optional helpers in both workspaces (Ollama for fully local, OpenRouter, or Google AI Studio). They answer questions, tweak shader options, and paint texture edits as an undoable layer.</li>
+          <li><strong>Layered pixel editor</strong> — layers, fill/line/shape tools, undo/redo, one-stroke recolor that keeps shading, zoom and pan, eyedropper, and a custom color picker.</li>
           <li><strong>Real vanilla textures</strong> — pulled from Mojang's official client jar for any Minecraft version, on demand.</li>
           <li><strong>Per-project &amp; safe export</strong> — each pack is isolated, and only the textures you actually edited get exported.</li>
-          <li><strong>Custom draggable color picker</strong> — saturation/brightness area, hue slider, hex and presets.</li>
         </ul>
       </section>
     </main>
